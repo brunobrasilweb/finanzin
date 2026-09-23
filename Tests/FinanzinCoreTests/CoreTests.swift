@@ -768,6 +768,98 @@ func testSeriesEditKeepsAttachmentsPerParcel() {
     check(store.attachmentCount(for: head.id) == 0, "cabeça intacta sem anexo")
 }
 
+// MARK: - Leitura de recibo (OCR → rascunho)
+
+func testReceiptParsesTotalWithMerchantAndDate() {
+    let scan = ReceiptParser.parse(lines: [
+        "PAO DE ACUCAR - MOEMA",
+        "CNPJ 12.345.678/0001-90",
+        "CUPOM FISCAL 000123",
+        "Pao frances kg        8,90",
+        "Leite integral        5,49",
+        "TOTAL R$ 128,90",
+        "23/09/2026 14:32",
+    ])
+    eq(scan.amount ?? 0, 128.90, "total do cupom")
+    check(scan.merchantName == "PAO DE ACUCAR - MOEMA", "estabelecimento (obtido \(scan.merchantName ?? "nil"))")
+    let cal = Calendar.current
+    check(cal.component(.day, from: scan.date ?? Date()) == 23, "dia do cupom")
+    check(cal.component(.month, from: scan.date ?? Date()) == 9, "mês do cupom")
+    check(scan.confidence == 1.0, "confiança cheia")
+}
+
+func testReceiptPrefersTotalOverTroco() {
+    let scan = ReceiptParser.parse(lines: [
+        "MERCADINHO DO ZE",
+        "TOTAL 250,00",
+        "DINHEIRO 300,00",
+        "TROCO 50,00",
+    ])
+    eq(scan.amount ?? 0, 250.00, "TOTAL vence TROCO maior? não — TROCO ignorado (obtido \(scan.amount ?? 0))")
+}
+
+func testReceiptParsesThousands() {
+    let scan = ReceiptParser.parse(lines: [
+        "LOJAS RENNER",
+        "VALOR TOTAL R$ 1.234,56",
+    ])
+    eq(scan.amount ?? 0, 1234.56, "milhar pt-BR (obtido \(scan.amount ?? 0))")
+}
+
+func testReceiptFallbackLargestWithoutTotal() {
+    let scan = ReceiptParser.parse(lines: [
+        "CANTINA DA PRACA",
+        "Prato feito   32,90",
+        "Suco          9,50",
+    ])
+    eq(scan.amount ?? 0, 32.90, "sem TOTAL usa o maior valor")
+    check(scan.confidence == 0.75, "confiança sem data (obtido \(scan.confidence))")
+}
+
+func testReceiptSkipsFiscalHeaders() {
+    let scan = ReceiptParser.parse(lines: [
+        "CUPOM FISCAL ELETRONICO",
+        "CNPJ 98.765.432/0001-10",
+        "POSTO SHELL IPIRANGA",
+        "GASOLINA COMUM 200,00",
+    ])
+    check(scan.merchantName == "POSTO SHELL IPIRANGA", "pula cabeçalho fiscal (obtido \(scan.merchantName ?? "nil"))")
+}
+
+func testReceiptSuggestsCategory() {
+    let cats = [
+        FinanceCategory(name: "Mercado", type: .expense),
+        FinanceCategory(name: "Transporte", type: .expense),
+        FinanceCategory(name: "Saúde", type: .expense),
+        FinanceCategory(name: "Salário", type: .income),
+    ]
+    let posto = ReceiptParser.parse(lines: ["POSTO SHELL", "GASOLINA 200,00"])
+    let postoID = ReceiptParser.suggestCategoryID(in: cats, scan: posto)
+    check(cats.first { $0.id == postoID }?.name == "Transporte", "posto → Transporte")
+    let farma = ReceiptParser.parse(lines: ["DROGASIL", "TOTAL 89,90"])
+    let farmaID = ReceiptParser.suggestCategoryID(in: cats, scan: farma)
+    check(cats.first { $0.id == farmaID }?.name == "Saúde", "drogaria → Saúde")
+    let unknown = ReceiptParser.parse(lines: ["XYZ INFORMATICA", "TOTAL 10,00"])
+    check(ReceiptParser.suggestCategoryID(in: cats, scan: unknown) == nil, "sem match → nil")
+}
+
+func testReceiptDraftMapping() {
+    let scan = ReceiptScanResult(
+        amount: Decimal(string: "42.5"), merchantName: "Padaria",
+        date: D(2026, 9, 23), rawText: "x", confidence: 1)
+    let draft = TransactionDraft(scan: scan)
+    eq(draft.amount ?? 0, 42.5, "valor vira draft")
+    check(draft.description == "Padaria", "descrição vira draft")
+    check(Calendar.current.component(.day, from: draft.date ?? Date()) == 23, "data vira draft")
+}
+
+func testReceiptNormalizeAmounts() {
+    eq(ReceiptParser.normalizeAmount("R$ 1.234,56") ?? 0, 1234.56, "R$ + milhar")
+    eq(ReceiptParser.normalizeAmount("12,90") ?? 0, 12.90, "vírgula simples")
+    eq(ReceiptParser.normalizeAmount("250.00") ?? 0, 250.00, "ponto decimal")
+    check(ReceiptParser.normalizeAmount("  ") == nil, "vazio → nil")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -825,6 +917,14 @@ struct TestRunner {
             ("testAttachmentSnapshotRoundTrip", testAttachmentSnapshotRoundTrip),
             ("testAttachmentSnapshotCompatOldJSON", testAttachmentSnapshotCompatOldJSON),
             ("testSeriesEditKeepsAttachmentsPerParcel", testSeriesEditKeepsAttachmentsPerParcel),
+            ("testReceiptParsesTotalWithMerchantAndDate", testReceiptParsesTotalWithMerchantAndDate),
+            ("testReceiptPrefersTotalOverTroco", testReceiptPrefersTotalOverTroco),
+            ("testReceiptParsesThousands", testReceiptParsesThousands),
+            ("testReceiptFallbackLargestWithoutTotal", testReceiptFallbackLargestWithoutTotal),
+            ("testReceiptSkipsFiscalHeaders", testReceiptSkipsFiscalHeaders),
+            ("testReceiptSuggestsCategory", testReceiptSuggestsCategory),
+            ("testReceiptDraftMapping", testReceiptDraftMapping),
+            ("testReceiptNormalizeAmounts", testReceiptNormalizeAmounts),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

@@ -386,11 +386,23 @@ public struct TransactionFormView: View {
     @State private var showingFileImporter = false
     @State private var showingCamera = false
     @State private var showingLibrary = false
+    // Leitura de recibo: a foto passa pelo OCR e pré-preenche o form.
+    @State private var capturePurpose: CapturePurpose = .attach
+    @State private var showingScanChoice = false
+    @State private var scanPayload: ScanPayload?
     @State private var previewURLs: [URL] = []
     @State private var previewIndex: Int = 0
     @State private var showingPreview = false
     @State private var attachmentError: String?
     private enum Field { case description, notes }
+    /// Para onde vai a foto da câmera/galeria: só anexar ou ler no OCR.
+    private enum CapturePurpose { case attach, scan }
+    /// Foto aguardando leitura no OCR. Sheet por item (nunca some no meio
+    /// da apresentação — evita modal vazio ao confirmar).
+    private struct ScanPayload: Identifiable {
+        let id = UUID().uuidString
+        let data: Data
+    }
     @FocusState private var focusedField: Field?
 
     public init(editing: FinancialTransaction? = nil, year: Int, month: Int, draft: TransactionDraft? = nil) {
@@ -491,6 +503,12 @@ public struct TransactionFormView: View {
                         }
                         #if os(iOS)
                         Button {
+                            showingScanChoice = true
+                        } label: {
+                            Label(store.t(.txScanReceipt), systemImage: "doc.text.viewfinder")
+                        }
+                        Button {
+                            capturePurpose = .attach
                             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                                 showingCamera = true
                             } else {
@@ -500,6 +518,7 @@ public struct TransactionFormView: View {
                             Label(store.t(.txTakePhoto), systemImage: "camera")
                         }
                         Button {
+                            capturePurpose = .attach
                             showingLibrary = true
                         } label: {
                             Label(store.t(.txChoosePhoto), systemImage: "photo")
@@ -646,6 +665,30 @@ public struct TransactionFormView: View {
                     onCancel: { showingLibrary = false }
                 )
             }
+            .confirmationDialog(
+                store.t(.txScanReceipt),
+                isPresented: $showingScanChoice
+            ) {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button(store.t(.txTakePhoto)) {
+                        capturePurpose = .scan
+                        showingCamera = true
+                    }
+                }
+                Button(store.t(.txChoosePhoto)) {
+                    capturePurpose = .scan
+                    showingLibrary = true
+                }
+                Button(store.t(.cancel), role: .cancel) {}
+            }
+            .sheet(item: $scanPayload) { payload in
+                ReceiptScanSheet(imageData: payload.data) { amount, desc, date, catID, image in
+                    applyScan(
+                        amount: amount, description: desc, date: date,
+                        categoryID: catID, imageData: image)
+                }
+                .environmentObject(store)
+            }
             #endif
             #if !os(iOS)
             // iOS apresenta o QuickLook via UIKit (ver AttachmentPreviewPresenter).
@@ -705,7 +748,36 @@ public struct TransactionFormView: View {
         showingCamera = false
         showingLibrary = false
         #endif
+        // Fluxo do scan: a foto vai para o OCR em vez de anexar direto.
+        // O anexo acontece no `applyScan`, junto com o pré-preenchimento.
+        if capturePurpose == .scan {
+            capturePurpose = .attach
+            // Apresenta no próximo ciclo: o sheet da câmera ainda está
+            // sendo dispensado e trocar dois sheets na mesma transação
+            // deixa modal zumbi (vazio) na pilha.
+            DispatchQueue.main.async {
+                scanPayload = ScanPayload(data: data)
+            }
+            return
+        }
         addData(data, fileName: fileName)
+    }
+
+    /// Aplica o resultado conferido do OCR: vira conta a pagar com valor,
+    /// descrição, data e categoria sugeridas; a foto vira comprovante
+    /// (pendente na criação, direto no Store na edição).
+    private func applyScan(
+        amount: Decimal, description: String, date: Date,
+        categoryID: String?, imageData: Data
+    ) {
+        type = .payable
+        self.amount = amount
+        self.description = description
+        dueDate = date
+        self.categoryID = categoryID
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        addData(imageData, fileName: "recibo-\(f.string(from: Date())).jpg")
     }
 
     private func addData(_ data: Data, fileName: String) {

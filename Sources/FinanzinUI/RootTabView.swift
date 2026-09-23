@@ -9,6 +9,7 @@ public struct RootTabView: View {
     @State private var selectedTab = 0
     @State private var dashboardCategory: String?
     @State private var showTxForm = false
+    @State private var txDraft: TransactionDraft?
     @State private var showBudgetForm = false
     @State private var showWishlistForm = false
 
@@ -70,8 +71,8 @@ public struct RootTabView: View {
         .finTabChrome()
         .environment(\.locale, store.settings.locale)
         .environmentObject(store)
-        .sheet(isPresented: $showTxForm) {
-            TransactionFormView(year: year, month: month)
+        .sheet(isPresented: $showTxForm, onDismiss: { txDraft = nil }) {
+            TransactionFormView(year: year, month: month, draft: txDraft)
                 .environmentObject(store)
         }
         .sheet(isPresented: $showBudgetForm) {
@@ -83,8 +84,27 @@ public struct RootTabView: View {
                 .environmentObject(store)
         }
         .onAppear { reschedule() }
+        .onOpenURL { url in openQuickAdd(url) }
         .onChange(of: store.transactions) { reschedule() }
         .onChange(of: store.settings) { reschedule() }
+    }
+
+    /// Deep link `finanzin://nova-transacao?...` (Siri/Atalhos/Botão de Ação):
+    /// ajusta o mês para a data do rascunho e abre o form pré-preenchido.
+    private func openQuickAdd(_ url: URL) {
+        guard let draft = TransactionDraft.from(url: url) else { return }
+        if let date = draft.date {
+            let cal = Calendar.current
+            year = cal.component(.year, from: date)
+            month = cal.component(.month, from: date)
+        } else {
+            let now = Date()
+            let cal = Calendar.current
+            year = cal.component(.year, from: now)
+            month = cal.component(.month, from: now)
+        }
+        txDraft = draft
+        showTxForm = true
     }
 
     /// Reagenda as notificações locais a cada mudança relevante.

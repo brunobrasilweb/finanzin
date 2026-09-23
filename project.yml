@@ -54,8 +54,8 @@ targets:
       # o UILaunchScreen sumiu e o app voltou a abrir pequeno no iPhone).
       properties:
         UILaunchScreen: {}
-        NSCameraUsageDescription: "Tirar foto do comprovante para anexar à transação."
-        NSPhotoLibraryUsageDescription: "Escolher foto do comprovante para anexar à transação."
+        NSCameraUsageDescription: "Tire foto do recibo para ler os dados e anexar como comprovante."
+        NSPhotoLibraryUsageDescription: "Escolha a foto do recibo para ler os dados e anexar como comprovante."
         CFBundleURLTypes:
           - CFBundleURLName: br.inoovexa.finanzin
             CFBundleURLSchemes: [finanzin]

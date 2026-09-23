@@ -116,6 +116,13 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case txAttachFailed
     case txSeriesAttachNote
     case txSaveToAttach
+    case txScanTitle
+    case txScanReceipt
+    case txScanReading
+    case txScanFailed
+    case txScanEmpty
+    case txScanHint
+    case txScanUse
     // Resumo
     case dashBalance
     case dashSavings
@@ -350,6 +357,13 @@ public enum L10n {
         case .txAttachFailed: "Não foi possível anexar o arquivo."
         case .txSeriesAttachNote: "O comprovante vale só para esta parcela."
         case .txSaveToAttach: "Os arquivos entram após salvar — já dá para tirar a foto e deixar pronta aqui."
+        case .txScanTitle: "Ler recibo"
+        case .txScanReceipt: "Escanear recibo"
+        case .txScanReading: "Lendo recibo…"
+        case .txScanFailed: "Não foi possível ler a foto. Preencha manualmente."
+        case .txScanEmpty: "Nenhum texto na foto — tente de novo com boa luz."
+        case .txScanHint: "A foto vira comprovante e os campos entram sozinhos. Confira antes de usar — a leitura pode errar."
+        case .txScanUse: "Usar estes dados"
         // Resumo
         case .dashBalance: "Balanço do mês"
         // 
@@ -578,6 +592,13 @@ public enum L10n {
         case .txAttachFailed: "Could not attach the file."
         case .txSeriesAttachNote: "The receipt applies to this installment only."
         case .txSaveToAttach: "Files attach after saving — you can take the photo now and keep it ready here."
+        case .txScanTitle: "Scan receipt"
+        case .txScanReceipt: "Scan receipt"
+        case .txScanReading: "Reading receipt…"
+        case .txScanFailed: "Could not read the photo. Fill in manually."
+        case .txScanEmpty: "No text in the photo — try again with good lighting."
+        case .txScanHint: "The photo becomes a receipt and fills the fields. Double-check before using — scanning can make mistakes."
+        case .txScanUse: "Use these details"
         case .dashBalance: "Month balance"
         case .dashSavings: "Savings"
         case .dashToReceive: "To receive"
