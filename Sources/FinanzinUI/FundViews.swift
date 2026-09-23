@@ -23,6 +23,7 @@ public struct FundListView: View {
                     if showClose {
                         HeaderButton("xmark") { dismiss() }
                     }
+                    PrivacyEyeButton()
                     HeaderButton("plus") { showingForm = true }
                 }
                 if store.funds.isEmpty {
@@ -63,8 +64,8 @@ public struct FundListView: View {
             }
             .finBackground()
             .finHideNavBar()
-            .sheet(isPresented: $showingForm) { FundFormView() }
-            .sheet(item: $editing) { fund in FundFormView(editing: fund) }
+            .sheet(isPresented: $showingForm) { FundFormView().environmentObject(store) }
+            .sheet(item: $editing) { fund in FundFormView(editing: fund).environmentObject(store) }
             .navigationDestination(item: $selectedID) { id in
                 if store.funds.first(where: { $0.id == id }) != nil {
                     FundDetailView(fundID: id)
@@ -93,7 +94,7 @@ public struct FundListView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                AmountText(store.balance(of: fund.id) ?? fund.initialAmount, style: .subheadline)
+                AmountText(store.balance(of: fund.id) ?? fund.initialAmount, style: .subheadline, hidden: store.valuesHidden)
                 Image(systemName: "chevron.right")
                     .font(.caption2.bold())
                     .foregroundStyle(VercelTheme.textTertiary)
@@ -115,6 +116,8 @@ public struct FundFormView: View {
     @State private var color: String
     @State private var icon: String
     @State private var errorMessage: String?
+    private enum Field { case name, notes }
+    @FocusState private var focusedField: Field?
 
     public init(editing: Fund? = nil) {
         self.editing = editing
@@ -127,13 +130,17 @@ public struct FundFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Dados") {
                         TextField("Nome (ex.: Viagem)", text: $name)
-                        CurrencyField(value: $initialAmount)
+                            .focused($focusedField, equals: .name)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .notes }
+                        CurrencyField(value: $initialAmount, showKeyboardToolbar: false)
                         TextField("Observações", text: $notes)
+                            .focused($focusedField, equals: .notes)
+                            .submitLabel(.done)
+                            .onSubmit { focusedField = nil }
                     }
                     Section("Cor (\(CategoryPalettes.colors.count) cores)") {
                         ColorOptionsGrid(selection: $color)
@@ -146,7 +153,10 @@ public struct FundFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Novo fundo" : "Editar fundo")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -155,6 +165,15 @@ public struct FundFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { save() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") {
+                        focusedField = nil
+                        KeyboardDismisser.dismiss()
+                    }
+                }
+                #endif
             }
         }
     }
@@ -204,10 +223,10 @@ public struct FundDetailView: View {
                     Section {
                         VStack(spacing: FinSpacing.sm) {
                             TintedIcon(fund.icon, tint: VercelTheme.hex(fund.color), size: 60)
-                            Text(Format.currency(store.balance(of: fund.id) ?? fund.initialAmount))
+                            Text(store.maskedAmount(store.balance(of: fund.id) ?? fund.initialAmount))
                                 .font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
                                 .foregroundStyle(VercelTheme.textPrimary)
-                            Text("inicial \(Format.currency(fund.initialAmount))")
+                            Text("inicial \(store.maskedAmount(fund.initialAmount))")
                                 .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                             if let notes = fund.notes, !notes.isEmpty {
                                 Text(notes).font(.footnote).foregroundStyle(VercelTheme.textSecondary)
@@ -232,7 +251,7 @@ public struct FundDetailView: View {
                                     Text(Format.shortDate(t.dueDate)).font(.caption).foregroundStyle(VercelTheme.textTertiary)
                                 }
                                 Spacer()
-                                Text("\(t.fundMovementType == .withdrawal ? "−" : "+")\(Format.currency(t.amount))")
+                                Text(store.valuesHidden ? "••••••" : "\(t.fundMovementType == .withdrawal ? "−" : "+")\(Format.currency(t.amount))")
                                     .font(.subheadline.bold())
                                     .monospacedDigit()
                                     .foregroundStyle(t.fundMovementType == .withdrawal ? .orange : .green)
@@ -260,16 +279,23 @@ public struct FundDetailView: View {
                 .navigationTitle(fund.name)
                 .toolbar {
                     ToolbarItemGroup(placement: .primaryAction) {
+                        Button {
+                            store.setValuesHidden(!store.valuesHidden)
+                        } label: {
+                            Image(systemName: store.valuesHidden ? "eye.slash" : "eye")
+                        }
                         Button("Sacar") { movement = .withdrawal }
                         Button("Aportar") { movement = .application }
                     }
                 }
                 .sheet(item: $movement) { kind in
                     FundMovementView(fundID: fund.id, movement: kind)
+                        .environmentObject(store)
                 }
                 .sheet(item: $editingTx) { tx in
                     let comp = Dates.competence(of: tx.dueDate)
                     TransactionFormView(editing: tx, year: comp.year, month: comp.month)
+                        .environmentObject(store)
                 }
             } else {
                 EmptyStateView(title: "Fundo removido", subtitle: "Volte para a lista.", icon: "chart.pie.fill")
@@ -292,6 +318,7 @@ public struct FundMovementView: View {
     @State private var amount: Decimal = 0
     @State private var date: Date = Date()
     @State private var errorMessage: String?
+    @FocusState private var descriptionFocused: Bool
 
     public init(fundID: String, movement: FundMovementType) {
         self.fundID = fundID
@@ -300,17 +327,18 @@ public struct FundMovementView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section(movement == .application ? "Aporte (conta a pagar)" : "Saque") {
                         TextField("Descrição", text: $description)
-                        CurrencyField(value: $amount)
-                        DatePicker("Data", selection: $date, displayedComponents: .date)
+                            .focused($descriptionFocused)
+                            .submitLabel(.done)
+                            .onSubmit { descriptionFocused = false }
+                        CurrencyField(value: $amount, showKeyboardToolbar: false)
+                        FormDateField("Data", date: $date)
                         if movement == .withdrawal,
                            let bal = store.balance(of: fundID)
                         {
-                            Text("Disponível: \(Format.currency(bal))")
+                            Text("Disponível: \(store.maskedAmount(bal))")
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                         }
                         Text("Será lançada como conta a pagar vinculada ao fundo.")
@@ -321,7 +349,10 @@ public struct FundMovementView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(movement == .application ? "Aportar" : "Sacar")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -330,6 +361,15 @@ public struct FundMovementView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { save() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") {
+                        descriptionFocused = false
+                        KeyboardDismisser.dismiss()
+                    }
+                }
+                #endif
             }
             .onAppear {
                 if description.isEmpty,

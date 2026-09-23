@@ -9,12 +9,14 @@ public struct DashboardView: View {
     @Binding var year: Int
     @Binding var month: Int
     var onSelectCategory: (String?) -> Void
+    var onSelectBudgets: () -> Void = {}
     @State private var showFunds = false
 
-    public init(year: Binding<Int>, month: Binding<Int>, onSelectCategory: @escaping (String?) -> Void) {
+    public init(year: Binding<Int>, month: Binding<Int>, onSelectCategory: @escaping (String?) -> Void, onSelectBudgets: @escaping () -> Void = {}) {
         _year = year
         _month = month
         self.onSelectCategory = onSelectCategory
+        self.onSelectBudgets = onSelectBudgets
     }
 
     public var body: some View {
@@ -22,11 +24,16 @@ public struct DashboardView: View {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: FinSpacing.md) {
-                        ScreenHeader("Resumo")
+                        ScreenHeader("Resumo") {
+                            PrivacyEyeButton()
+                        }
                         MonthPicker(year: $year, month: $month)
                         heroCard
                         statGrid
                         fundsCard
+                        if !budgetRows.isEmpty {
+                            budgetsCard
+                        }
                         evolutionCard
                         breakdownCard
                         upcomingCard
@@ -40,6 +47,7 @@ public struct DashboardView: View {
             .finHideNavBar()
             .sheet(isPresented: $showFunds) {
                 FundListView(showClose: true)
+                    .environmentObject(store)
             }
         }
     }
@@ -74,7 +82,7 @@ public struct DashboardView: View {
                 .font(.caption.bold())
                 .foregroundStyle(VercelTheme.textSecondary)
                 .textCase(.uppercase)
-            Text(Format.currency(metrics.balance))
+            Text(store.maskedAmount(metrics.balance))
                 .font(.system(size: 38, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(VercelTheme.textPrimary)
@@ -104,7 +112,7 @@ public struct DashboardView: View {
                 .foregroundStyle(color)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.caption2).foregroundStyle(VercelTheme.textSecondary)
-                Text(Format.currency(value))
+                Text(store.maskedAmount(value))
                     .font(.subheadline.bold()).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
@@ -134,7 +142,7 @@ public struct DashboardView: View {
                     .foregroundStyle(VercelTheme.textPrimary)
             } else if let value {
                 let isZero = (value as NSDecimalNumber).doubleValue == 0
-                Text(Format.currency(value))
+                Text(store.maskedAmount(value))
                     .font(.subheadline.bold()).monospacedDigit()
                     .foregroundStyle(isZero ? VercelTheme.textTertiary : (color ?? VercelTheme.textPrimary))
                     .lineLimit(1)
@@ -161,7 +169,7 @@ public struct DashboardView: View {
                         .foregroundStyle(VercelTheme.textPrimary)
                     Text(store.funds.isEmpty
                         ? "Nenhum fundo criado"
-                        : "\(store.funds.count) fundo(s) · \(Format.currency(fundsTotal))")
+                        : "\(store.funds.count) fundo(s) · \(store.maskedAmount(fundsTotal))")
                         .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 }
                 Spacer()
@@ -173,6 +181,84 @@ public struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .finCard()
+    }
+
+    // MARK: - Orçamentos do mês (atalho para a lista completa)
+
+    private var budgetRows: [BudgetService.Row] {
+        BudgetService.rows(limits: store.budgets, transactions: store.transactions, year: year, month: month)
+            .sorted { $0.percent > $1.percent }
+    }
+
+    private var budgetsCard: some View {
+        Button(action: onSelectBudgets) {
+            VStack(alignment: .leading, spacing: FinSpacing.sm) {
+                HStack {
+                    Text("Orçamentos")
+                        .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
+                    Spacer()
+                    Text("\(budgetRows.count)")
+                        .font(.caption.bold()).foregroundStyle(VercelTheme.textTertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.bold())
+                        .foregroundStyle(VercelTheme.textTertiary)
+                }
+                ForEach(budgetRows.prefix(5), id: \.limit.id) { row in
+                    budgetLine(row)
+                }
+                if budgetRows.count > 5 {
+                    Text("+\(budgetRows.count - 5) outros")
+                        .font(.caption).foregroundStyle(VercelTheme.textTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .finCard()
+    }
+
+    private func budgetLine(_ row: BudgetService.Row) -> some View {
+        let cat = store.category(id: row.limit.categoryID)
+        let barColor: Color = row.isOver ? .red : row.isWarning ? .orange : .green
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: FinSpacing.sm) {
+                Circle()
+                    .fill(VercelTheme.hex(cat?.color ?? "#64748b"))
+                    .frame(width: 8, height: 8)
+                Text(cat?.name ?? "Categoria removida")
+                    .font(.subheadline)
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Spacer()
+                if row.isOver {
+                    Text("Estourou \(store.maskedAmount(row.used - row.limit.limitAmount))")
+                        .font(.caption.bold()).monospacedDigit()
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Restam \(store.maskedAmount(row.remaining))")
+                        .font(.caption.bold()).monospacedDigit()
+                        .foregroundStyle(row.isWarning ? .orange : VercelTheme.textSecondary)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 6)
+                    LinearGradient(
+                        colors: [barColor.opacity(0.7), barColor],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .frame(width: max(geo.size.width * min(row.percent / 100, 1), row.percent > 0 ? 8 : 0), height: 6)
+                }
+            }
+            .frame(height: 6)
+            Text("\(store.maskedAmount(row.used)) de \(store.maskedAmount(row.limit.limitAmount))")
+                .font(.caption2)
+                .foregroundStyle(VercelTheme.textTertiary)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Evolução 6 meses
@@ -212,7 +298,7 @@ public struct DashboardView: View {
                     "Despesas": Color.red.gradient,
                 ])
                 .chartXAxis { AxisMarks { AxisValueLabel().foregroundStyle(VercelTheme.textTertiary).font(.caption2) } }
-                .chartYAxis { AxisMarks { AxisValueLabel().foregroundStyle(VercelTheme.textTertiary).font(.caption2) } }
+                .chartYAxisHidden(store.valuesHidden)
                 .chartLegend(position: .bottom, alignment: .leading, spacing: FinSpacing.sm)
                 .frame(minHeight: 180, maxHeight: .infinity)
             }
@@ -244,7 +330,7 @@ public struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Total")
                             .font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                        Text(Format.currency(breakdownTotal))
+                        Text(store.maskedAmount(breakdownTotal))
                             .font(.headline).monospacedDigit()
                             .foregroundStyle(VercelTheme.textPrimary)
                         Text("\(breakdown.count) categorias")
@@ -261,7 +347,7 @@ public struct DashboardView: View {
                                 .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
                                 .lineLimit(1)
                             Spacer()
-                            Text(Format.currency(item.total))
+                            Text(store.maskedAmount(item.total))
                                 .font(.subheadline).monospacedDigit()
                                 .foregroundStyle(VercelTheme.textSecondary)
                             Text("\(Int(item.percentage))%")
@@ -294,7 +380,7 @@ public struct DashboardView: View {
                     .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                 Spacer()
                 if metrics.pendingPayable > 0 {
-                    Text(Format.currency(metrics.pendingPayable))
+                    Text(store.maskedAmount(metrics.pendingPayable))
                         .font(.caption.bold()).monospacedDigit()
                         .foregroundStyle(.orange)
                 }
@@ -318,7 +404,7 @@ public struct DashboardView: View {
                                 .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                         }
                         Spacer()
-                        Text(Format.currency(t.amount))
+                        Text(store.maskedAmount(t.amount))
                             .font(.subheadline.bold()).monospacedDigit()
                             .foregroundStyle(t.type == .receivable ? .green : VercelTheme.textPrimary)
                     }
@@ -327,5 +413,24 @@ public struct DashboardView: View {
             }
         }
         .finCard()
+    }
+}
+
+// MARK: - Eixo Y condicional (modo privado esconde a escala de valores)
+
+private extension View {
+    @ViewBuilder
+    func chartYAxisHidden(_ hidden: Bool) -> some View {
+        if hidden {
+            self.chartYAxis(.hidden)
+        } else {
+            self.chartYAxis {
+                AxisMarks {
+                    AxisValueLabel()
+                        .foregroundStyle(VercelTheme.textTertiary)
+                        .font(.caption2)
+                }
+            }
+        }
     }
 }

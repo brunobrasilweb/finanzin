@@ -16,6 +16,7 @@ public struct TransactionListView: View {
     @State private var statusFilter: TransactionStatus?
     @Binding var categoryID: String?
     @State private var search = ""
+    @FocusState private var searchFocused: Bool
 
     public init(year: Binding<Int>, month: Binding<Int>, categoryID: Binding<String?>) {
         _year = year
@@ -27,27 +28,45 @@ public struct TransactionListView: View {
         NavigationStack {
             VStack(spacing: FinSpacing.sm) {
                 ScreenHeader("Transações") {
+                    PrivacyEyeButton()
                     HeaderButton("tag") { showingCategories = true }
                 }
                 MonthPicker(year: $year, month: $month)
                     .padding(.horizontal, FinSpacing.lg)
 
                 HStack(spacing: FinSpacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(VercelTheme.textTertiary)
-                    TextField("Buscar", text: $search)
+                    searchField
+                    filterButton
                 }
-                .padding(.horizontal, FinSpacing.md)
-                .padding(.vertical, FinSpacing.sm)
-                .background(VercelTheme.inset)
-                .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous)
-                        .stroke(VercelTheme.border, lineWidth: 1)
-                )
                 .padding(.horizontal, FinSpacing.lg)
 
-                filterBar
+                Picker("Tipo", selection: $typeFilter) {
+                    Text("Todas").tag(nil as TransactionType?)
+                    Text("A pagar").tag(TransactionType.payable as TransactionType?)
+                    Text("A receber").tag(TransactionType.receivable as TransactionType?)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, FinSpacing.lg)
+
+                if let cid = categoryID, let cat = store.category(id: cid) {
+                    HStack {
+                        Button { categoryID = nil } label: {
+                            HStack(spacing: 6) {
+                                Circle().fill(VercelTheme.hex(cat.color)).frame(width: 7, height: 7)
+                                Text(cat.name).font(.caption.bold())
+                                Image(systemName: "xmark").font(.caption2.bold())
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(VercelTheme.inset)
+                            .foregroundStyle(VercelTheme.textSecondary)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.horizontal, FinSpacing.lg)
+                }
 
                 if filtered.isEmpty {
                         EmptyStateView(
@@ -59,7 +78,9 @@ public struct TransactionListView: View {
                         List {
                             ForEach(filtered) { t in
                                 row(t)
-                                    .finRow()
+                                    .listRowBackground(Color.clear)
+                                    .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                                    .listRowSeparatorTint(VercelTheme.border.opacity(0.6))
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         Button(role: .destructive) {
                                             pendingDelete = t
@@ -86,19 +107,34 @@ public struct TransactionListView: View {
                                     .onTapGesture { editing = t }
                             }
                         }
-                        .finList()
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        #if os(iOS)
+                        .scrollDismissesKeyboard(.immediately)
+                        #endif
                     }
                 }
             .finBackground()
             .finHideNavBar()
+            #if os(iOS)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") { searchFocused = false }
+                }
+            }
+            #endif
             .sheet(isPresented: $showingCategories) {
                 CategoryListView()
+                    .environmentObject(store)
             }
             .sheet(item: $editing) { t in
                 TransactionFormView(editing: t, year: year, month: month)
+                    .environmentObject(store)
             }
             .sheet(item: $settling) { t in
                 SettleTransactionView(transaction: t)
+                    .environmentObject(store)
             }
             .confirmationDialog(
                 "Excluir conta",
@@ -132,40 +168,83 @@ public struct TransactionListView: View {
         }
     }
 
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip("Todas", selected: typeFilter == nil) { typeFilter = nil }
-                filterChip("A pagar", selected: typeFilter == .payable) { typeFilter = .payable }
-                filterChip("A receber", selected: typeFilter == .receivable) { typeFilter = .receivable }
-                Divider().frame(height: 20)
-                filterChip("Pendente", selected: statusFilter == .pending) {
-                    statusFilter = statusFilter == .pending ? nil : .pending
+    private var hasActiveFilters: Bool {
+        statusFilter != nil || categoryID != nil
+    }
+
+    private var searchField: some View {
+        HStack(spacing: FinSpacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(VercelTheme.textTertiary)
+            TextField("Buscar", text: $search)
+                .focused($searchFocused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+                .foregroundStyle(VercelTheme.textPrimary)
+                .tint(VercelTheme.textPrimary)
+                .onSubmit { searchFocused = false }
+            if !search.isEmpty {
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(VercelTheme.textTertiary)
                 }
-                filterChip("Pago", selected: statusFilter == .paid) {
-                    statusFilter = statusFilter == .paid ? nil : .paid
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, FinSpacing.md)
+        .padding(.vertical, 9)
+        .background(VercelTheme.inset)
+        .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+    }
+
+    private var filterButton: some View {
+        Menu {
+            Section("Status") {
+                Button { statusFilter = nil } label: {
+                    statusOption("Todas", active: statusFilter == nil)
                 }
-                if categoryID != nil {
-                    filterChip("Categoria ×", selected: true) { categoryID = nil }
+                Button { statusFilter = .pending } label: {
+                    statusOption("Pendente", active: statusFilter == .pending)
+                }
+                Button { statusFilter = .paid } label: {
+                    statusOption("Pago", active: statusFilter == .paid)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
+            if categoryID != nil {
+                Section("Categoria") {
+                    Button(role: .destructive) { categoryID = nil } label: {
+                        Label("Limpar filtro", systemImage: "xmark")
+                    }
+                }
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.subheadline.bold())
+                    .frame(width: 38, height: 38)
+                    .background(VercelTheme.inset)
+                    .foregroundStyle(hasActiveFilters ? VercelTheme.textPrimary : VercelTheme.textSecondary)
+                    .clipShape(Circle())
+                if hasActiveFilters {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 8, height: 8)
+                        .offset(x: -3, y: 3)
+                }
+            }
         }
     }
 
-    private func filterChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func statusOption(_ title: String, active: Bool) -> some View {
+        HStack {
             Text(title)
-                .font(.caption.bold())
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(selected ? Color.white : VercelTheme.inset)
-                .foregroundStyle(selected ? Color.black : VercelTheme.textSecondary)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(selected ? Color.clear : VercelTheme.border, lineWidth: 1))
+            if active {
+                Image(systemName: "checkmark")
+            }
         }
-        .buttonStyle(.plain)
     }
 
     private var filtered: [FinancialTransaction] {
@@ -179,50 +258,65 @@ public struct TransactionListView: View {
 
     private func row(_ t: FinancialTransaction) -> some View {
         HStack(spacing: FinSpacing.md) {
-            TintedIcon(
-                t.type == .payable ? "arrow.up.right" : "arrow.down.left",
-                tint: t.type == .payable ? .red.opacity(0.85) : .green
-            )
-            VStack(alignment: .leading, spacing: 3) {
+            Image(systemName: t.type == .payable ? "arrow.up.right" : "arrow.down.left")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.type == .payable ? .red.opacity(0.9) : .green)
+                .frame(width: 32, height: 32)
+                .background(VercelTheme.inset)
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
                 Text(t.description)
-                    .font(.subheadline.bold())
+                    .font(.subheadline)
                     .foregroundStyle(VercelTheme.textPrimary)
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    if let cat = store.category(id: t.categoryID) {
-                        Circle().fill(VercelTheme.hex(cat.color)).frame(width: 7, height: 7)
-                        Text(cat.name).font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                    }
-                    Text(shortDate(t.dueDate)).font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                    if let n = t.currentInstallment, t.recurrence == .installment {
-                        Text("\(n)/\(t.installmentCount)").font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                    } else if t.recurrence == .fixed {
-                        Text("Fixa").font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                    } else if t.recurrence == .recurring {
-                        Text("Recorrente").font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                    }
-                }
+                Text(metaLine(t))
+                    .font(.caption)
+                    .foregroundStyle(VercelTheme.textTertiary)
+                    .lineLimit(1)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(amountString(t.amount))
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(store.valuesHidden ? "••••••" : amountString(t.amount))
                     .font(.subheadline.bold())
                     .monospacedDigit()
                     .foregroundStyle(t.type == .receivable ? .green : VercelTheme.textPrimary)
-                statusPill(t)
+                statusLine(t)
             }
         }
+        .padding(.vertical, 2)
     }
 
-    private func statusPill(_ t: FinancialTransaction) -> StatusPill {
-        if t.isOverdue {
-            return StatusPill("Vencido", color: .red)
+    private func metaLine(_ t: FinancialTransaction) -> String {
+        var parts: [String] = []
+        if let cat = store.category(id: t.categoryID) {
+            parts.append(cat.name)
         }
-        switch t.status {
-        case .pending: return StatusPill("Pendente", color: .orange)
-        case .paid: return StatusPill("Pago", color: .green)
-        case .canceled: return StatusPill("Cancelado", color: .gray)
-        case .overdue: return StatusPill("Vencido", color: .red)
+        parts.append(shortDate(t.dueDate))
+        if let n = t.currentInstallment, t.recurrence == .installment {
+            parts.append("\(n)/\(t.installmentCount)")
+        } else if t.recurrence == .fixed {
+            parts.append("Fixa")
+        } else if t.recurrence == .recurring {
+            parts.append("Recorrente")
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private func statusLine(_ t: FinancialTransaction) -> some View {
+        let (label, color): (String, Color) = {
+            if t.isOverdue {
+                return ("Vencido", .red)
+            }
+            switch t.status {
+            case .pending: return ("Pendente", .orange)
+            case .paid: return ("Pago", VercelTheme.textTertiary)
+            case .canceled: return ("Cancelado", .gray)
+            case .overdue: return ("Vencido", .red)
+            }
+        }()
+        return HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).font(.caption2).foregroundStyle(color)
         }
     }
 
@@ -264,6 +358,8 @@ public struct TransactionFormView: View {
     @State private var interval: InstallmentInterval
     @State private var showingScopeConfirm = false
     @State private var errors: [String] = []
+    private enum Field { case description, notes }
+    @FocusState private var focusedField: Field?
 
     public init(editing: FinancialTransaction? = nil, year: Int, month: Int) {
         self.editing = editing
@@ -287,9 +383,7 @@ public struct TransactionFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Tipo de conta") {
                         Picker("Tipo", selection: $type) {
                             Label("A pagar", systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
@@ -301,11 +395,15 @@ public struct TransactionFormView: View {
                     Section("Valor") {
                         ProminentCurrencyField(
                             value: $amount,
-                            tint: type == .payable ? .red.opacity(0.9) : .green
+                            tint: type == .payable ? .red.opacity(0.9) : .green,
+                            showKeyboardToolbar: false
                         )
                     }
                     Section("Dados") {
                         TextField("Descrição", text: $description)
+                            .focused($focusedField, equals: .description)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .notes }
                         Picker("Categoria", selection: $categoryID) {
                             Text("Sem categoria").tag(nil as String?)
                             ForEach(store.categories.filter { $0.type == (type == .payable ? .expense : .income) }) { cat in
@@ -314,12 +412,15 @@ public struct TransactionFormView: View {
                         }
                     }
                     Section("Vencimento e status") {
-                        DatePicker("Vencimento", selection: $dueDate, displayedComponents: .date)
+                        FormDateField("Vencimento", date: $dueDate)
                         Picker("Status", selection: $status) {
                             Text("Pendente").tag(TransactionStatus.pending)
                             Text("Pago").tag(TransactionStatus.paid)
                         }
                         TextField("Observações", text: $notes)
+                            .focused($focusedField, equals: .notes)
+                            .submitLabel(.done)
+                            .onSubmit { focusedField = nil }
                         if editingIsSeries {
                             Text("Se o alcance incluir outras parcelas, cada uma mantém seu vencimento.")
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
@@ -373,7 +474,10 @@ public struct TransactionFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Nova transação" : "Editar transação")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -385,6 +489,12 @@ public struct TransactionFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { requestSave() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") { dismissKeyboard() }
+                }
+                #endif
             }
             .confirmationDialog(
                 "Editar conta em série",
@@ -405,6 +515,11 @@ public struct TransactionFormView: View {
                 Text("“\(target.description)” é \(target.recurrence.label.lowercased()). Alterar somente esta, esta e as próximas ou todas? Vencimentos das demais são preservados.")
             }
         }
+    }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        KeyboardDismisser.dismiss()
     }
 
     private func requestSave() {
@@ -495,9 +610,7 @@ public struct SettleTransactionView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(transaction.description)
@@ -514,13 +627,13 @@ public struct SettleTransactionView: View {
                             tint: transaction.type == .payable ? .red.opacity(0.9) : .green
                         )
                         if amount != transaction.amount {
-                            Text("Valor original: \(amountString(transaction.amount))")
+                            Text("Valor original: \(store.maskedAmount(transaction.amount))")
                                 .font(.footnote)
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
                     Section("Data da baixa") {
-                        DatePicker("Pago em", selection: $paidDate, displayedComponents: .date)
+                        FormDateField("Pago em", date: $paidDate)
                     }
                     if !errors.isEmpty {
                         Section {
@@ -531,7 +644,10 @@ public struct SettleTransactionView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle("Dar baixa")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)

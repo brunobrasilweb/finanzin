@@ -11,6 +11,22 @@ public final class Store: ObservableObject {
     @Published public var wishlists: [Wishlist] = []
     @Published public var wishlistItems: [WishlistItem] = []
 
+    /// Preferência de privacidade (olho no topo): esconde valores monetários.
+    /// Persistida em UserDefaults, fora do Snapshot JSON.
+    private static let valuesHiddenKey = "finValuesHidden"
+    @Published public var valuesHidden: Bool = UserDefaults.standard.bool(forKey: "finValuesHidden") {
+        didSet { UserDefaults.standard.set(valuesHidden, forKey: Self.valuesHiddenKey) }
+    }
+
+    public func setValuesHidden(_ hidden: Bool) {
+        valuesHidden = hidden
+    }
+
+    /// Texto de valor respeitando o modo privado ("••••••" quando oculto).
+    public func maskedAmount(_ value: Decimal) -> String {
+        valuesHidden ? "••••••" : Currency.format(value)
+    }
+
     private let fileURL: URL?
 
     public init(persistTo fileURL: URL? = nil, seedIfEmpty: Bool = true) {
@@ -224,7 +240,7 @@ public final class Store: ObservableObject {
     }
 
     public func fundTransactions(fundID: String) -> [FinancialTransaction] {
-        transactions.filter { $0.fundID == fundID }.sorted { $0.dueDate > $1.dueDate }
+        transactions.filter { $0.fundID == fundID }.sorted { $0.dueDate < $1.dueDate }
     }
 
     public func balance(of fundID: String) -> Decimal? {

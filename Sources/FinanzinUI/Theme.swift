@@ -1,4 +1,5 @@
 import SwiftUI
+import FinanzinCore
 
 // MARK: - Design tokens (dark profundo, estilo Vercel)
 
@@ -93,6 +94,19 @@ public extension View {
             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             .listRowBackground(Color.clear)
     }
+    /// Linha clean: sem fundo cinza, só separador sutil (padrão Transações).
+    func finCleanRow() -> some View {
+        self
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20))
+            .listRowSeparatorTint(VercelTheme.border.opacity(0.6))
+    }
+    /// Lista clean: fundo transparente, estilo plain, sem cards.
+    func finCleanList() -> some View {
+        self
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+    }
     /// Fundo dark padrão das telas. Expansivo de borda a borda (notch do
     /// iPhone 13 Pro Max e home indicator): o fundo ignora a safe area e o
     /// conteúdo continua respeitando-a.
@@ -141,14 +155,16 @@ public extension View {
 public struct AmountText: View {
     let value: Decimal
     var style: Font = .body
+    var hidden: Bool = false
 
-    public init(_ value: Decimal, style: Font = .body) {
+    public init(_ value: Decimal, style: Font = .body, hidden: Bool = false) {
         self.value = value
         self.style = style
+        self.hidden = hidden
     }
 
     public var body: some View {
-        Text(Format.currency(value))
+        Text(hidden ? "••••••" : Format.currency(value))
             .font(style.bold())
             .monospacedDigit()
             .foregroundStyle((value as NSDecimalNumber).doubleValue >= 0 ? VercelTheme.textPrimary : Color.red.opacity(0.9))
@@ -359,6 +375,32 @@ public struct HeaderButton: View {
     }
 }
 
+/// Dispensa o teclado resignando o first responder atual (iOS).
+/// Cobre campos cujo `FocusState` vive dentro de outra view
+/// (ex.: `CurrencyField`), que um `@FocusState` local não alcança.
+public enum KeyboardDismisser {
+    public static func dismiss() {
+        #if os(iOS)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
+    }
+}
+
+/// Olho do topo: alterna o modo privado (esconde/mostra valores em todas
+/// as telas). Lê o estado do `Store`, então todas as telas sincronizam.
+public struct PrivacyEyeButton: View {
+    @EnvironmentObject var store: Store
+
+    public init() {}
+
+    public var body: some View {
+        HeaderButton(store.valuesHidden ? "eye.slash" : "eye") {
+            store.setValuesHidden(!store.valuesHidden)
+        }
+        .accessibilityLabel(store.valuesHidden ? "Mostrar valores" : "Esconder valores")
+    }
+}
+
 public enum Format {
     public static func currency(_ value: Decimal) -> String {
         let f = NumberFormatter()
@@ -372,6 +414,77 @@ public enum Format {
         let f = DateFormatter()
         f.locale = Locale(identifier: "pt_BR")
         f.dateFormat = "dd/MM/yy"
+        return f.string(from: date)
+    }
+}
+
+/// Linha de data para uso dentro de `Form`.
+///
+/// Por que não usar `DatePicker` inline? O `DatePicker` compacto dentro de
+/// `Form` expande o calendário inline, mudando a altura do formulário de
+/// forma brusca (salto + "tremor" ao rolar até o fim). Aqui a altura da
+/// linha é fixa e o calendário abre em sheet, que some ao tocar no dia
+/// (ou em OK / arrastar para baixo).
+public struct FormDateField: View {
+    let title: String
+    @Binding var date: Date
+    @State private var showingPicker = false
+
+    public init(_ title: String, date: Binding<Date>) {
+        self.title = title
+        _date = date
+    }
+
+    public var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button {
+                showingPicker = true
+            } label: {
+                Text(Self.label(for: date))
+                    .font(.body)
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(VercelTheme.inset)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $showingPicker) {
+            NavigationStack {
+                DatePicker(
+                    title,
+                    selection: $date,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .padding()
+                .onChange(of: date) {
+                    // Tocar num dia já fecha o calendário.
+                    showingPicker = false
+                }
+                .navigationTitle(title)
+                #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("OK") { showingPicker = false }
+                    }
+                }
+            }
+            #if os(iOS)
+            .presentationDetents([.medium])
+            #endif
+        }
+    }
+
+    static func label(for date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "pt_BR")
+        f.dateStyle = .short
         return f.string(from: date)
     }
 }

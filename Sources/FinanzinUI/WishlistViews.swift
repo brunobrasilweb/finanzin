@@ -13,7 +13,9 @@ public struct WishlistListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.md) {
-                ScreenHeader("Desejos")
+                ScreenHeader("Desejos") {
+                    PrivacyEyeButton()
+                }
                 if store.wishlists.isEmpty {
                     EmptyStateView(
                         title: "Sem listas",
@@ -24,7 +26,8 @@ public struct WishlistListView: View {
                     List {
                         ForEach(store.wishlists.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }) { list in
                             card(list)
-                                .finRow()
+                                .finCleanRow()
+                                .padding(.vertical, 2)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         store.deleteWishlist(id: list.id)
@@ -42,12 +45,14 @@ public struct WishlistListView: View {
                                 .onTapGesture { selectedID = list.id }
                         }
                     }
-                    .finList()
+                    .finCleanList()
                 }
             }
             .finBackground()
             .finHideNavBar()
-            .sheet(item: $editing) { list in WishlistFormView(editing: list) }
+            .sheet(item: $editing) { list in WishlistFormView(editing: list)
+                .environmentObject(store)
+            }
             .navigationDestination(item: $selectedID) { id in
                 if store.wishlists.first(where: { $0.id == id }) != nil {
                     WishlistDetailView(wishlistID: id)
@@ -67,7 +72,7 @@ public struct WishlistListView: View {
                     .foregroundStyle(VercelTheme.textPrimary)
                 Text(pending.isEmpty
                     ? "Tudo comprado 🎉"
-                    : "\(pending.count) pendente(s) · \(Format.currency(store.pendingTotal(wishlistID: list.id)))")
+                    : "\(pending.count) pendente(s) · \(store.maskedAmount(store.pendingTotal(wishlistID: list.id)))")
                     .font(.caption).foregroundStyle(VercelTheme.textSecondary)
             }
             Spacer()
@@ -89,6 +94,7 @@ public struct WishlistFormView: View {
     @State private var color: String
     @State private var icon: String
     @State private var errorMessage: String?
+    @FocusState private var nameFocused: Bool
 
     public init(editing: Wishlist? = nil) {
         self.editing = editing
@@ -99,11 +105,12 @@ public struct WishlistFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Dados") {
                         TextField("Nome (ex.: Setup)", text: $name)
+                            .focused($nameFocused)
+                            .submitLabel(.done)
+                            .onSubmit { nameFocused = false }
                     }
                     Section("Cor (\(CategoryPalettes.colors.count) cores)") {
                         ColorOptionsGrid(selection: $color)
@@ -116,7 +123,10 @@ public struct WishlistFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Nova lista" : "Editar lista")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -125,6 +135,15 @@ public struct WishlistFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { save() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") {
+                        nameFocused = false
+                        KeyboardDismisser.dismiss()
+                    }
+                }
+                #endif
             }
         }
     }
@@ -165,11 +184,21 @@ public struct WishlistDetailView: View {
                     EmptyStateView(title: "Lista vazia", subtitle: "Adicione o primeiro desejo.", icon: "gift")
                 } else {
                     List {
-                        Section { totalsCard(list).finRow() }
-                        Section("Itens") {
+                        Section {
+                            totalsCard(list)
+                                .finCleanRow()
+                                .listRowSeparator(.hidden)
+                        }
+                        Section(header:
+                            Text("Itens")
+                                .font(.caption.bold())
+                                .foregroundStyle(VercelTheme.textTertiary)
+                                .textCase(.uppercase)
+                        ) {
                             ForEach(items) { item in
                                 itemRow(item)
-                                    .finRow()
+                                    .finCleanRow()
+                                    .padding(.vertical, 2)
                                     .swipeActions(edge: .leading) {
                                         if item.purchased {
                                             Button("Reabrir") { store.setPurchased(id: item.id, purchased: false) }
@@ -197,7 +226,7 @@ public struct WishlistDetailView: View {
                             }
                         }
                     }
-                    .finList()
+                    .finCleanList()
                 }
             } else {
                 EmptyStateView(title: "Lista removida", subtitle: "Volte para as listas.", icon: "heart.fill")
@@ -207,13 +236,22 @@ public struct WishlistDetailView: View {
         .finDetailChrome()
         .navigationTitle(store.wishlists.first(where: { $0.id == wishlistID })?.name ?? "Desejos")
         .toolbar {
-            Button { showingItemForm = true } label: { Image(systemName: "plus") }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    store.setValuesHidden(!store.valuesHidden)
+                } label: {
+                    Image(systemName: store.valuesHidden ? "eye.slash" : "eye")
+                }
+                Button { showingItemForm = true } label: { Image(systemName: "plus") }
+            }
         }
         .sheet(isPresented: $showingItemForm) {
             WishlistItemFormView(wishlistID: wishlistID)
+                .environmentObject(store)
         }
         .sheet(item: $editingItem) { item in
             WishlistItemFormView(wishlistID: item.wishlistID, editing: item)
+                .environmentObject(store)
         }
     }
 
@@ -221,7 +259,7 @@ public struct WishlistDetailView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Falta juntar").font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(Format.currency(store.pendingTotal(wishlistID: list.id)))
+                Text(store.maskedAmount(store.pendingTotal(wishlistID: list.id)))
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
@@ -256,7 +294,7 @@ public struct WishlistDetailView: View {
                 }
             }
             Spacer()
-            Text(Format.currency(item.estimatedPrice))
+            Text(store.maskedAmount(item.estimatedPrice))
                 .font(.subheadline.bold())
                 .monospacedDigit()
                 .foregroundStyle(VercelTheme.textPrimary)
@@ -283,6 +321,8 @@ public struct WishlistItemFormView: View {
     @State private var categoryID: String?
     @State private var notes: String
     @State private var errorMessage: String?
+    private enum Field { case name, notes }
+    @FocusState private var focusedField: Field?
     @State private var generatedMessage: String?
 
     public init(wishlistID: String, editing: WishlistItem? = nil) {
@@ -297,12 +337,13 @@ public struct WishlistItemFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Desejo") {
                         TextField("Nome", text: $name)
-                        CurrencyField(value: $price)
+                            .focused($focusedField, equals: .name)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .notes }
+                        CurrencyField(value: $price, showKeyboardToolbar: false)
                         Picker("Prioridade", selection: $priority) {
                             Text("Baixa").tag(WishlistPriority.low)
                             Text("Média").tag(WishlistPriority.medium)
@@ -315,6 +356,9 @@ public struct WishlistItemFormView: View {
                             }
                         }
                         TextField("Observações", text: $notes)
+                            .focused($focusedField, equals: .notes)
+                            .submitLabel(.done)
+                            .onSubmit { focusedField = nil }
                     }
                     if editing != nil {
                         Section("Compra") {
@@ -332,7 +376,10 @@ public struct WishlistItemFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Novo desejo" : "Editar desejo")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -341,6 +388,15 @@ public struct WishlistItemFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { save() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") {
+                        focusedField = nil
+                        KeyboardDismisser.dismiss()
+                    }
+                }
+                #endif
             }
         }
     }

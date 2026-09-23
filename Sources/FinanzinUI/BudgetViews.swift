@@ -18,7 +18,9 @@ public struct BudgetListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.md) {
-                ScreenHeader("Orçamento")
+                ScreenHeader("Orçamento") {
+                    PrivacyEyeButton()
+                }
                 MonthPicker(year: $year, month: $month)
                     .padding(.horizontal, FinSpacing.lg)
                 if rows.isEmpty {
@@ -29,11 +31,21 @@ public struct BudgetListView: View {
                     )
                 } else {
                     List {
-                        Section { totalsCard.finRow() }
-                        Section("Por categoria") {
+                        Section {
+                            totalsCard
+                                .finCleanRow()
+                                .listRowSeparator(.hidden)
+                        }
+                        Section(header:
+                            Text("Por categoria")
+                                .font(.caption.bold())
+                                .foregroundStyle(VercelTheme.textTertiary)
+                                .textCase(.uppercase)
+                        ) {
                             ForEach(rows, id: \.limit.id) { row in
                                 budgetRow(row)
-                                    .finRow()
+                                    .finCleanRow()
+                                    .padding(.vertical, 2)
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         Button(role: .destructive) {
                                             store.deleteBudget(id: row.limit.id)
@@ -51,13 +63,14 @@ public struct BudgetListView: View {
                             }
                         }
                     }
-                    .finList()
+                    .finCleanList()
                 }
             }
             .finBackground()
             .finHideNavBar()
             .sheet(item: $editing) { limit in
                 BudgetFormView(editing: limit, year: year, month: month)
+                    .environmentObject(store)
             }
         }
     }
@@ -73,14 +86,14 @@ public struct BudgetListView: View {
         return HStack(spacing: FinSpacing.lg) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Limite total").font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(Format.currency(totalLimit))
+                Text(store.maskedAmount(totalLimit))
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 Text("Utilizado").font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(Format.currency(totalUsed))
+                Text(store.maskedAmount(totalUsed))
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(totalUsed > totalLimit ? .red : VercelTheme.textPrimary)
             }
@@ -108,7 +121,7 @@ public struct BudgetListView: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    Text("\(Format.currency(row.used)) de \(Format.currency(row.limit.limitAmount))")
+                    Text("\(store.maskedAmount(row.used)) de \(store.maskedAmount(row.limit.limitAmount))")
                         .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 }
                 Spacer()
@@ -136,8 +149,8 @@ public struct BudgetListView: View {
             }
             .frame(height: 10)
             Text(row.isOver
-                ? "Acima do limite por \(Format.currency(row.used - row.limit.limitAmount))"
-                : "Restam \(Format.currency(row.remaining))")
+                ? "Acima do limite por \(store.maskedAmount(row.used - row.limit.limitAmount))"
+                : "Restam \(store.maskedAmount(row.remaining))")
                 .font(.caption)
                 .foregroundStyle(row.isOver ? .red : VercelTheme.textSecondary)
         }
@@ -169,9 +182,7 @@ public struct BudgetFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Limite mensal") {
                         Picker("Categoria", selection: $categoryID) {
                             Text("Selecione").tag(nil as String?)
@@ -210,7 +221,10 @@ public struct BudgetFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Novo orçamento" : "Editar orçamento")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

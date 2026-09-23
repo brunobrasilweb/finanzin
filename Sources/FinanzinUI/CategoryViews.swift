@@ -95,9 +95,11 @@ public struct CategoryListView: View {
             .finHideNavBar()
             .sheet(isPresented: $showingForm) {
                 CategoryFormView { _ in }
+                    .environmentObject(store)
             }
             .sheet(item: $editing) { cat in
                 CategoryFormView(editing: cat) { _ in }
+                    .environmentObject(store)
             }
         }
     }
@@ -120,6 +122,7 @@ public struct CategoryFormView: View {
     @State private var color: String
     @State private var icon: String
     @State private var errorMessage: String?
+    @FocusState private var nameFocused: Bool
 
     public init(editing: FinanceCategory? = nil, onSaved: @escaping (FinanceCategory) -> Void) {
         self.editing = editing
@@ -132,11 +135,12 @@ public struct CategoryFormView: View {
 
     public var body: some View {
         NavigationStack {
-            ZStack {
-                VercelTheme.bg.ignoresSafeArea()
-                Form {
+            Form {
                     Section("Dados") {
                         TextField("Nome", text: $name)
+                            .focused($nameFocused)
+                            .submitLabel(.done)
+                            .onSubmit { nameFocused = false }
                         Picker("Tipo", selection: $type) {
                             Text("Despesa").tag(CategoryType.expense)
                             Text("Receita").tag(CategoryType.income)
@@ -153,7 +157,10 @@ public struct CategoryFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-            }
+                .background(VercelTheme.bg)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
             .navigationTitle(editing == nil ? "Nova categoria" : "Editar categoria")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -165,6 +172,15 @@ public struct CategoryFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Salvar") { save() }
                 }
+                #if os(iOS)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("OK") {
+                        nameFocused = false
+                        KeyboardDismisser.dismiss()
+                    }
+                }
+                #endif
             }
         }
     }

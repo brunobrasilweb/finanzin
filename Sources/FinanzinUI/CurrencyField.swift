@@ -7,14 +7,18 @@ import Foundation
 public struct CurrencyField: View {
     @Binding var value: Decimal
     var placeholder: String = "R$ 0,00"
+    /// Mostra o botão OK sobre o teclado. Desligue quando o formulário
+    /// já tem um OK próprio (para não duplicar).
+    var showKeyboardToolbar: Bool = true
 
     @State private var text: String = ""
     @State private var didInit = false
     @FocusState private var isFocused: Bool
 
-    public init(value: Binding<Decimal>, placeholder: String = "R$ 0,00") {
+    public init(value: Binding<Decimal>, placeholder: String = "R$ 0,00", showKeyboardToolbar: Bool = true) {
         _value = value
         self.placeholder = placeholder
+        self.showKeyboardToolbar = showKeyboardToolbar
     }
 
     public var body: some View {
@@ -60,9 +64,11 @@ public struct CurrencyField: View {
             }
             .toolbar {
                 #if os(iOS)
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("OK") { isFocused = false }
+                    if showKeyboardToolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("OK") { isFocused = false }
+                        }
                     }
                 #endif
             }
@@ -83,23 +89,21 @@ public struct CurrencyField: View {
 public struct ProminentCurrencyField: View {
     @Binding var value: Decimal
     var tint: Color
+    var showKeyboardToolbar: Bool = true
 
-    public init(value: Binding<Decimal>, tint: Color) {
+    public init(value: Binding<Decimal>, tint: Color, showKeyboardToolbar: Bool = true) {
         _value = value
         self.tint = tint
+        self.showKeyboardToolbar = showKeyboardToolbar
     }
 
     public var body: some View {
-        HStack(spacing: 8) {
-            Spacer(minLength: 0)
-            CurrencyField(value: $value)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(tint)
-                .tint(tint)
-                .frame(maxWidth: .infinity)
-            Spacer(minLength: 0)
-        }
+        CurrencyField(value: $value, showKeyboardToolbar: showKeyboardToolbar)
+            .font(.system(size: 34, weight: .bold, design: .rounded))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(tint)
+            .tint(tint)
+            .frame(maxWidth: .infinity, minHeight: 44)
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
