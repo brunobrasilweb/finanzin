@@ -1,16 +1,27 @@
 import Foundation
 
 public enum Currency {
-    public static var brl: NumberFormatter {
+    /// Formatter parametrizado (Sprint 7: moeda configurável).
+    public static func formatter(currencyCode: String, localeIdentifier: String) -> NumberFormatter {
         let f = NumberFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: localeIdentifier)
         f.numberStyle = .currency
-        f.currencyCode = "BRL"
+        f.currencyCode = currencyCode
         return f
     }
 
+    public static func format(_ value: Decimal, currencyCode: String, localeIdentifier: String) -> String {
+        formatter(currencyCode: currencyCode, localeIdentifier: localeIdentifier)
+            .string(from: value as NSDecimalNumber)
+            ?? "\(currencyCode) 0.00"
+    }
+
+    public static var brl: NumberFormatter {
+        formatter(currencyCode: "BRL", localeIdentifier: "pt_BR")
+    }
+
     public static func format(_ value: Decimal) -> String {
-        brl.string(from: value as NSDecimalNumber) ?? "R$ 0,00"
+        format(value, currencyCode: "BRL", localeIdentifier: "pt_BR")
     }
 
     /// Divide valor em N parcelas com ajuste de centavos na última.

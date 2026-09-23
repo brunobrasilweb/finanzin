@@ -129,27 +129,43 @@ public enum TransactionEngine {
 
     // MARK: - Validação (Sprint 1: à vista)
 
-    /// Retorna lista de erros em pt-BR; vazia = válido.
-    public static func validate(description: String, amount: Decimal) -> [String] {
+    /// Retorna lista de erros; vazia = válido.
+    public static func validate(description: String, amount: Decimal, language: AppLanguage = .ptBR) -> [String] {
         var errors: [String] = []
         if description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errors.append("Descrição é obrigatória.")
+            switch language {
+            case .en: errors.append("Description is required.")
+            case .ptBR: errors.append("Descrição é obrigatória.")
+            }
         }
         if (amount as NSDecimalNumber).doubleValue < 0 {
-            errors.append("Valor não pode ser negativo.")
+            switch language {
+            case .en: errors.append("Amount cannot be negative.")
+            case .ptBR: errors.append("Valor não pode ser negativo.")
+            }
         }
         return errors
     }
 
-    /// Valida série parcelada/recorrente. Retorna erros em pt-BR.
-    public static func validateSeries(recurrence: RecurrenceType, count: Int?, interval: InstallmentInterval?) -> [String] {
+    /// Valida série parcelada/recorrente.
+    public static func validateSeries(recurrence: RecurrenceType, count: Int?, interval: InstallmentInterval?, language: AppLanguage = .ptBR) -> [String] {
         switch recurrence {
         case .unique, .fixed:
             return []
         case .installment:
             var errors: [String] = []
-            if (count ?? 0) < 2 { errors.append("Parcelamento precisa de ao menos 2 parcelas.") }
-            if interval == nil { errors.append("Escolha o intervalo das parcelas.") }
+            if (count ?? 0) < 2 {
+                switch language {
+                case .en: errors.append("Installments need at least 2 parcels.")
+                case .ptBR: errors.append("Parcelamento precisa de ao menos 2 parcelas.")
+                }
+            }
+            if interval == nil {
+                switch language {
+                case .en: errors.append("Choose the installment interval.")
+                case .ptBR: errors.append("Escolha o intervalo das parcelas.")
+                }
+            }
             return errors
         case .recurring:
             // Intervalo tem padrão mensal; nada obrigatório.
@@ -236,9 +252,12 @@ public enum TransactionEngine {
     }
 
     /// Validação da baixa: valor não negativo.
-    public static func validateSettle(amount: Decimal) -> [String] {
+    public static func validateSettle(amount: Decimal, language: AppLanguage = .ptBR) -> [String] {
         if (amount as NSDecimalNumber).doubleValue < 0 {
-            return ["Valor da baixa não pode ser negativo."]
+            switch language {
+            case .en: return ["Settlement amount cannot be negative."]
+            case .ptBR: return ["Valor da baixa não pode ser negativo."]
+            }
         }
         return []
     }

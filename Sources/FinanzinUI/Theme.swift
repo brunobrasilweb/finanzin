@@ -1,27 +1,114 @@
 import SwiftUI
 import FinanzinCore
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
-// MARK: - Design tokens (dark profundo, estilo Vercel)
+// MARK: - Design tokens (adaptativos light/dark, estilo Vercel)
+//
+// Cada token resolve conforme o `colorScheme` ativo (que segue
+// `Store.settings.theme`). Nada de `.white`/`.black` fixo nas Views —
+// use os tokens, senão o modo claro quebra.
 
 public enum VercelTheme {
-    /// Preto OLED de fundo.
-    public static let bg = Color(red: 0.02, green: 0.02, blue: 0.024) // #050506
-    /// Superfície elevada (cards).
-    public static let card = Color(red: 0.075, green: 0.075, blue: 0.085) // #131316
-    /// Superfície embutida (pills, inputs inativos).
-    public static let inset = Color.white.opacity(0.06)
-    public static let border = Color.white.opacity(0.09)
-    public static let borderStrong = Color.white.opacity(0.16)
-    public static let textPrimary = Color.white
-    public static let textSecondary = Color.white.opacity(0.55)
-    public static let textTertiary = Color.white.opacity(0.35)
-    public static let accent = Color.white
+    #if os(iOS)
+    private static func dynamic(light: UIColor, dark: UIColor) -> Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
 
-    /// Brilho sutil no topo das telas (profundidade sem sair do dark).
-    public static let topGlow = LinearGradient(
-        colors: [Color.white.opacity(0.07), Color.clear],
-        startPoint: .top, endPoint: .center
-    )
+    private static func bw(_ white: Double, alpha: Double) -> Color {
+        dynamic(
+            light: UIColor(white: 0, alpha: alpha),
+            dark: UIColor(white: white, alpha: alpha)
+        )
+    }
+    #else
+    private static func dynamic(light: NSColor, dark: NSColor) -> Color {
+        Color(NSColor(name: nil) { $0.name == .darkAqua ? dark : light })
+    }
+
+    private static func bw(_ white: Double, alpha: Double) -> Color {
+        dynamic(
+            light: NSColor(white: 0, alpha: alpha),
+            dark: NSColor(white: white, alpha: alpha)
+        )
+    }
+    #endif
+
+    /// Fundo: branco puro no light, preto OLED no dark.
+    public static var bg: Color {
+        #if os(iOS)
+        return dynamic(
+            light: UIColor(white: 1, alpha: 1),
+            dark: UIColor(red: 0.02, green: 0.02, blue: 0.024, alpha: 1)
+        )
+        #else
+        return dynamic(
+            light: NSColor(white: 1, alpha: 1),
+            dark: NSColor(red: 0.02, green: 0.02, blue: 0.024, alpha: 1)
+        )
+        #endif
+    }
+
+    /// Superfície elevada (cards): cinza claro no light, #131316 no dark.
+    public static var card: Color {
+        #if os(iOS)
+        return dynamic(
+            light: UIColor(red: 0.945, green: 0.945, blue: 0.957, alpha: 1),
+            dark: UIColor(red: 0.075, green: 0.075, blue: 0.085, alpha: 1)
+        )
+        #else
+        return dynamic(
+            light: NSColor(red: 0.945, green: 0.945, blue: 0.957, alpha: 1),
+            dark: NSColor(red: 0.075, green: 0.075, blue: 0.085, alpha: 1)
+        )
+        #endif
+    }
+
+    /// Superfície embutida (pills, inputs inativos).
+    public static var inset: Color { bw(1, alpha: 0.06) }
+    public static var border: Color { bw(1, alpha: 0.09) }
+    public static var borderStrong: Color { bw(1, alpha: 0.16) }
+    public static var textPrimary: Color { bw(1, alpha: 1) }
+    public static var textSecondary: Color { bw(1, alpha: 0.55) }
+    public static var textTertiary: Color { bw(1, alpha: 0.35) }
+    public static var accent: Color { bw(1, alpha: 1) }
+
+    /// Trilho das barras de progresso (orçamento/resumo).
+    public static var track: Color { bw(1, alpha: 0.08) }
+
+    /// Sombra dos cards (mais leve no light).
+    public static var shadow: Color {
+        #if os(iOS)
+        return dynamic(
+            light: UIColor(white: 0, alpha: 0.12),
+            dark: UIColor(white: 0, alpha: 0.35)
+        )
+        #else
+        return dynamic(
+            light: NSColor(white: 0, alpha: 0.12),
+            dark: NSColor(white: 0, alpha: 0.35)
+        )
+        #endif
+    }
+
+    /// Brilho sutil no topo das telas (profundidade).
+    public static var topGlow: LinearGradient {
+        LinearGradient(
+            colors: [bw(1, alpha: 0.07), Color.clear],
+            startPoint: .top, endPoint: .center
+        )
+    }
+
+    /// Destaque de borda do card-herói (brilho claro no dark, sombra no light).
+    public static var edgeHighlight: LinearGradient {
+        LinearGradient(
+            colors: [bw(1, alpha: 0.22), bw(1, alpha: 0.05)],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+    }
 
     public static func hex(_ hex: String) -> Color {
         var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,7 +150,7 @@ public struct FinCardStyle: ViewModifier {
                 RoundedRectangle(cornerRadius: FinRadius.lg, style: .continuous)
                     .stroke(VercelTheme.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
+            .shadow(color: VercelTheme.shadow, radius: 12, y: 6)
     }
 }
 
@@ -107,7 +194,7 @@ public extension View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
     }
-    /// Fundo dark padrão das telas. Expansivo de borda a borda (notch do
+    /// Fundo do tema (segue light/dark). Expansivo de borda a borda (notch do
     /// iPhone 13 Pro Max e home indicator): o fundo ignora a safe area e o
     /// conteúdo continua respeitando-a.
     func finBackground() -> some View {
@@ -117,36 +204,53 @@ public extension View {
         }
     }
     /// Esconde a nav bar do sistema (iOS; telas raiz usam ScreenHeader) e
-    /// pinta o chrome do sistema de dark para não aparecer faixa clara no
-    /// topo (notch) nem no fundo (tab bar / home indicator).
+    /// pinta o chrome do sistema com o fundo do tema (segue light/dark).
     func finHideNavBar() -> some View {
+        modifier(FinHideNavBar())
+    }
+    /// Pinta o chrome do sistema com o fundo do tema sem esconder a nav bar
+    /// (telas de detalhe com botão voltar).
+    func finDetailChrome() -> some View {
+        modifier(FinDetailChrome())
+    }
+}
+
+/// Lê o `colorScheme` resolvido (abaixo do `preferredColorScheme` da raiz)
+/// para o chrome acompanhar o tema em vez de forçar dark.
+private struct FinChromeBase: ViewModifier {
+    @Environment(\.colorScheme) var scheme
+    var hidesBar: Bool
+
+    func body(content: Content) -> some View {
         #if os(iOS)
-            self
-                .toolbar(.hidden, for: .navigationBar)
-                .toolbarBackground(VercelTheme.bg, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarBackground(VercelTheme.bg, for: .tabBar)
-                .toolbarBackground(.visible, for: .tabBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .tabBar)
+        Group {
+            if hidesBar {
+                content.toolbar(.hidden, for: .navigationBar)
+            } else {
+                content
+            }
+        }
+        .toolbarBackground(VercelTheme.bg, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(VercelTheme.bg, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarColorScheme(scheme, for: .navigationBar)
+        .toolbarColorScheme(scheme, for: .tabBar)
         #else
-            self
+        content
         #endif
     }
-    /// Pinta o chrome do sistema de dark sem esconder a nav bar (telas de
-    /// detalhe com botão voltar).
-    func finDetailChrome() -> some View {
-        #if os(iOS)
-            self
-                .toolbarBackground(VercelTheme.bg, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarBackground(VercelTheme.bg, for: .tabBar)
-                .toolbarBackground(.visible, for: .tabBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .tabBar)
-        #else
-            self
-        #endif
+}
+
+private struct FinHideNavBar: ViewModifier {
+    func body(content: Content) -> some View {
+        content.modifier(FinChromeBase(hidesBar: true))
+    }
+}
+
+private struct FinDetailChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content.modifier(FinChromeBase(hidesBar: false))
     }
 }
 
@@ -156,15 +260,22 @@ public struct AmountText: View {
     let value: Decimal
     var style: Font = .body
     var hidden: Bool = false
+    var currencyCode: String = "BRL"
+    var localeIdentifier: String = "pt_BR"
 
-    public init(_ value: Decimal, style: Font = .body, hidden: Bool = false) {
+    public init(
+        _ value: Decimal, style: Font = .body, hidden: Bool = false,
+        currencyCode: String = "BRL", localeIdentifier: String = "pt_BR"
+    ) {
         self.value = value
         self.style = style
         self.hidden = hidden
+        self.currencyCode = currencyCode
+        self.localeIdentifier = localeIdentifier
     }
 
     public var body: some View {
-        Text(hidden ? "••••••" : Format.currency(value))
+        Text(hidden ? "••••••" : Format.currency(value, currencyCode: currencyCode, localeIdentifier: localeIdentifier))
             .font(style.bold())
             .monospacedDigit()
             .foregroundStyle((value as NSDecimalNumber).doubleValue >= 0 ? VercelTheme.textPrimary : Color.red.opacity(0.9))
@@ -209,10 +320,12 @@ public struct EmptyStateView: View {
 public struct MonthPicker: View {
     @Binding var year: Int
     @Binding var month: Int
+    var localeIdentifier: String = "pt_BR"
 
-    public init(year: Binding<Int>, month: Binding<Int>) {
+    public init(year: Binding<Int>, month: Binding<Int>, localeIdentifier: String = "pt_BR") {
         _year = year
         _month = month
+        self.localeIdentifier = localeIdentifier
     }
 
     public var body: some View {
@@ -252,7 +365,7 @@ public struct MonthPicker: View {
 
     private var label: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: localeIdentifier)
         f.dateFormat = "MMMM yyyy"
         let d = Calendar.current.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
         return f.string(from: d).capitalized
@@ -397,24 +510,45 @@ public struct PrivacyEyeButton: View {
         HeaderButton(store.valuesHidden ? "eye.slash" : "eye") {
             store.setValuesHidden(!store.valuesHidden)
         }
-        .accessibilityLabel(store.valuesHidden ? "Mostrar valores" : "Esconder valores")
+        .accessibilityLabel(store.valuesHidden ? store.t(.showValues) : store.t(.hideValues))
     }
 }
 
 public enum Format {
     public static func currency(_ value: Decimal) -> String {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "pt_BR")
-        f.numberStyle = .currency
-        f.currencyCode = "BRL"
-        return f.string(from: value as NSDecimalNumber) ?? "R$ 0,00"
+        Currency.format(value)
+    }
+
+    public static func currency(_ value: Decimal, currencyCode: String, localeIdentifier: String) -> String {
+        Currency.format(value, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
     }
 
     public static func shortDate(_ date: Date) -> String {
+        shortDate(date, localeIdentifier: "pt_BR")
+    }
+
+    public static func shortDate(_ date: Date, localeIdentifier: String) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: localeIdentifier)
         f.dateFormat = "dd/MM/yy"
         return f.string(from: date)
+    }
+}
+
+// MARK: - Aparência (Sprint 7: ThemeMode do Core → SwiftUI)
+//
+// O Core não importa SwiftUI (não resolve no CLT), então o mapeamento
+// `ThemeMode → ColorScheme` vive aqui. Nota: os tokens `VercelTheme`
+// são dark-hardcoded; no modo claro o fundo segue escuro até existirem
+// tokens light (issue futura) — o `system` default preserva o visual atual.
+
+public extension ThemeMode {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
     }
 }
 
@@ -428,11 +562,15 @@ public enum Format {
 public struct FormDateField: View {
     let title: String
     @Binding var date: Date
+    var localeIdentifier: String = "pt_BR"
+    var okTitle: String = "OK"
     @State private var showingPicker = false
 
-    public init(_ title: String, date: Binding<Date>) {
+    public init(_ title: String, date: Binding<Date>, localeIdentifier: String = "pt_BR", okTitle: String = "OK") {
         self.title = title
         _date = date
+        self.localeIdentifier = localeIdentifier
+        self.okTitle = okTitle
     }
 
     public var body: some View {
@@ -442,7 +580,7 @@ public struct FormDateField: View {
             Button {
                 showingPicker = true
             } label: {
-                Text(Self.label(for: date))
+                Text(Self.label(for: date, localeIdentifier: localeIdentifier))
                     .font(.body)
                     .foregroundStyle(VercelTheme.textPrimary)
                     .padding(.horizontal, 12)
@@ -471,7 +609,7 @@ public struct FormDateField: View {
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("OK") { showingPicker = false }
+                        Button(okTitle) { showingPicker = false }
                     }
                 }
             }
@@ -482,8 +620,12 @@ public struct FormDateField: View {
     }
 
     static func label(for date: Date) -> String {
+        label(for: date, localeIdentifier: "pt_BR")
+    }
+
+    static func label(for date: Date, localeIdentifier: String) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: localeIdentifier)
         f.dateStyle = .short
         return f.string(from: date)
     }

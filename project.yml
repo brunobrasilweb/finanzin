@@ -48,6 +48,11 @@ targets:
       - target: FinanzinCore
     info:
       path: FinanzinApp/Info.plist
+      # Chaves customizadas do plist DEVEM ser declaradas aqui: o xcodegen
+      # reescreve o arquivo e apaga o que não estiver no spec (foi assim que
+      # o UILaunchScreen sumiu e o app voltou a abrir pequeno no iPhone).
+      properties:
+        UILaunchScreen: {}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.inoovexa.finanzin

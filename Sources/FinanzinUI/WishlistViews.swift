@@ -13,13 +13,13 @@ public struct WishlistListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.md) {
-                ScreenHeader("Desejos") {
+                ScreenHeader(store.t(.wishlist)) {
                     PrivacyEyeButton()
                 }
                 if store.wishlists.isEmpty {
                     EmptyStateView(
-                        title: "Sem listas",
-                        subtitle: "Crie listas (ex.: Viagem, Setup) e priorize seus desejos.",
+                        title: store.t(.wishEmptyTitle),
+                        subtitle: store.t(.wishEmptySubtitle),
                         icon: "heart.fill"
                     )
                 } else {
@@ -32,13 +32,13 @@ public struct WishlistListView: View {
                                     Button(role: .destructive) {
                                         store.deleteWishlist(id: list.id)
                                     } label: {
-                                        Label("Excluir", systemImage: "trash")
+                                        Label(store.t(.delete), systemImage: "trash")
                                     }
                                     .tint(.red)
                                     Button {
                                         editing = list
                                     } label: {
-                                        Label("Editar", systemImage: "pencil")
+                                        Label(store.t(.edit), systemImage: "pencil")
                                     }
                                     .tint(.blue)
                                 }
@@ -71,8 +71,11 @@ public struct WishlistListView: View {
                     .font(.subheadline.bold())
                     .foregroundStyle(VercelTheme.textPrimary)
                 Text(pending.isEmpty
-                    ? "Tudo comprado 🎉"
-                    : "\(pending.count) pendente(s) · \(store.maskedAmount(store.pendingTotal(wishlistID: list.id)))")
+                    ? store.t(.wishAllBought)
+                    : String(
+                        format: store.t(.wishPendingSummary),
+                        pending.count, store.maskedAmount(store.pendingTotal(wishlistID: list.id))
+                    ))
                     .font(.caption).foregroundStyle(VercelTheme.textSecondary)
             }
             Spacer()
@@ -106,16 +109,16 @@ public struct WishlistFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section("Dados") {
-                        TextField("Nome (ex.: Setup)", text: $name)
+                    Section(store.t(.dataSection)) {
+                        TextField(store.t(.wishNamePh), text: $name)
                             .focused($nameFocused)
                             .submitLabel(.done)
                             .onSubmit { nameFocused = false }
                     }
-                    Section("Cor (\(CategoryPalettes.colors.count) cores)") {
+                    Section(String(format: store.t(.colorsCount), CategoryPalettes.colors.count)) {
                         ColorOptionsGrid(selection: $color)
                     }
-                    Section("Ícone (\(CategoryPalettes.icons.count) ícones)") {
+                    Section(String(format: store.t(.iconsCount), CategoryPalettes.icons.count)) {
                         IconOptionsGrid(selection: $icon, tintHex: color)
                     }
                     if let errorMessage {
@@ -123,22 +126,22 @@ public struct WishlistFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? "Nova lista" : "Editar lista")
+            .navigationTitle(editing == nil ? store.t(.wishNewList) : store.t(.wishEditList))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { save() }
+                    Button(store.t(.save)) { save() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") {
+                    Button(store.t(.ok)) {
                         nameFocused = false
                         KeyboardDismisser.dismiss()
                     }
@@ -160,7 +163,7 @@ public struct WishlistFormView: View {
             }
             dismiss()
         } catch {
-            errorMessage = "Nome é obrigatório."
+            errorMessage = store.t(.nameRequired)
         }
     }
 }
@@ -181,7 +184,7 @@ public struct WishlistDetailView: View {
             if let list = store.wishlists.first(where: { $0.id == wishlistID }) {
                 let items = store.items(of: list.id)
                 if items.isEmpty {
-                    EmptyStateView(title: "Lista vazia", subtitle: "Adicione o primeiro desejo.", icon: "gift")
+                    EmptyStateView(title: store.t(.wishEmptyListTitle), subtitle: store.t(.wishEmptyListSubtitle), icon: "gift")
                 } else {
                     List {
                         Section {
@@ -190,7 +193,7 @@ public struct WishlistDetailView: View {
                                 .listRowSeparator(.hidden)
                         }
                         Section(header:
-                            Text("Itens")
+                            Text(store.t(.wishItems))
                                 .font(.caption.bold())
                                 .foregroundStyle(VercelTheme.textTertiary)
                                 .textCase(.uppercase)
@@ -201,10 +204,10 @@ public struct WishlistDetailView: View {
                                     .padding(.vertical, 2)
                                     .swipeActions(edge: .leading) {
                                         if item.purchased {
-                                            Button("Reabrir") { store.setPurchased(id: item.id, purchased: false) }
+                                            Button(store.t(.wishReopen)) { store.setPurchased(id: item.id, purchased: false) }
                                                 .tint(.orange)
                                         } else {
-                                            Button("Comprar") { store.setPurchased(id: item.id, purchased: true) }
+                                            Button(store.t(.wishBuy)) { store.setPurchased(id: item.id, purchased: true) }
                                                 .tint(.green)
                                         }
                                     }
@@ -212,13 +215,13 @@ public struct WishlistDetailView: View {
                                         Button(role: .destructive) {
                                             store.deleteItem(id: item.id)
                                         } label: {
-                                            Label("Excluir", systemImage: "trash")
+                                            Label(store.t(.delete), systemImage: "trash")
                                         }
                                         .tint(.red)
                                         Button {
                                             editingItem = item
                                         } label: {
-                                            Label("Editar", systemImage: "pencil")
+                                            Label(store.t(.edit), systemImage: "pencil")
                                         }
                                         .tint(.blue)
                                     }
@@ -229,12 +232,12 @@ public struct WishlistDetailView: View {
                     .finCleanList()
                 }
             } else {
-                EmptyStateView(title: "Lista removida", subtitle: "Volte para as listas.", icon: "heart.fill")
+                EmptyStateView(title: store.t(.wishRemovedTitle), subtitle: store.t(.wishRemovedSubtitle), icon: "heart.fill")
             }
         }
         .finBackground()
         .finDetailChrome()
-        .navigationTitle(store.wishlists.first(where: { $0.id == wishlistID })?.name ?? "Desejos")
+        .navigationTitle(store.wishlists.first(where: { $0.id == wishlistID })?.name ?? store.t(.wishlist))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -242,6 +245,7 @@ public struct WishlistDetailView: View {
                 } label: {
                     Image(systemName: store.valuesHidden ? "eye.slash" : "eye")
                 }
+                .accessibilityLabel(store.valuesHidden ? store.t(.showValues) : store.t(.hideValues))
                 Button { showingItemForm = true } label: { Image(systemName: "plus") }
             }
         }
@@ -258,14 +262,14 @@ public struct WishlistDetailView: View {
     private func totalsCard(_ list: Wishlist) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Falta juntar").font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(store.t(.wishToGo)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 Text(store.maskedAmount(store.pendingTotal(wishlistID: list.id)))
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text("Comprados").font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(store.t(.wishBought)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 let done = store.items(of: list.id).filter(\.purchased).count
                 let total = store.items(of: list.id).count
                 Text("\(done)/\(total)")
@@ -287,7 +291,7 @@ public struct WishlistDetailView: View {
                     .foregroundStyle(VercelTheme.textPrimary)
                     .strikethrough(item.purchased)
                 HStack(spacing: 6) {
-                    StatusPill(item.priority.label, color: priorityColor(item.priority))
+                    StatusPill(item.priority.label(language: store.lang), color: priorityColor(item.priority))
                     if let cat = store.category(id: item.categoryID) {
                         Text(cat.name).font(.caption).foregroundStyle(VercelTheme.textSecondary)
                     }
@@ -338,35 +342,39 @@ public struct WishlistItemFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section("Desejo") {
-                        TextField("Nome", text: $name)
+                    Section(store.t(.wishDesire)) {
+                        TextField(store.t(.nameField), text: $name)
                             .focused($focusedField, equals: .name)
                             .submitLabel(.next)
                             .onSubmit { focusedField = .notes }
-                        CurrencyField(value: $price, showKeyboardToolbar: false)
-                        Picker("Prioridade", selection: $priority) {
-                            Text("Baixa").tag(WishlistPriority.low)
-                            Text("Média").tag(WishlistPriority.medium)
-                            Text("Alta").tag(WishlistPriority.high)
+                        CurrencyField(
+                            value: $price, showKeyboardToolbar: false,
+                            currencyCode: store.settings.currency.currencyCode,
+                            localeIdentifier: store.settings.currency.localeIdentifier
+                        )
+                        Picker(store.t(.wishPriority), selection: $priority) {
+                            Text(WishlistPriority.low.label(language: store.lang)).tag(WishlistPriority.low)
+                            Text(WishlistPriority.medium.label(language: store.lang)).tag(WishlistPriority.medium)
+                            Text(WishlistPriority.high.label(language: store.lang)).tag(WishlistPriority.high)
                         }
-                        Picker("Categoria", selection: $categoryID) {
-                            Text("Sem categoria").tag(nil as String?)
+                        Picker(store.t(.categoryLabel), selection: $categoryID) {
+                            Text(store.t(.noCategory)).tag(nil as String?)
                             ForEach(store.categories.filter { $0.type == .expense }) { cat in
                                 Text(cat.name).tag(cat.id as String?)
                             }
                         }
-                        TextField("Observações", text: $notes)
+                        TextField(store.t(.notesField), text: $notes)
                             .focused($focusedField, equals: .notes)
                             .submitLabel(.done)
                             .onSubmit { focusedField = nil }
                     }
                     if editing != nil {
-                        Section("Compra") {
-                            Button("Gerar conta a pagar") { generate() }
+                        Section(store.t(.wishPurchaseSection)) {
+                            Button(store.t(.wishGenerate)) { generate() }
                             if let generatedMessage {
                                 Text(generatedMessage).font(.footnote).foregroundStyle(.green)
                             } else {
-                                Text("Cria um “a pagar” único com nome, preço e categoria do item.")
+                                Text(store.t(.wishGenerateFootnote))
                                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                             }
                         }
@@ -376,22 +384,22 @@ public struct WishlistItemFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? "Novo desejo" : "Editar desejo")
+            .navigationTitle(editing == nil ? store.t(.wishNewItem) : store.t(.wishEditItem))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { save() }
+                    Button(store.t(.save)) { save() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") {
+                    Button(store.t(.ok)) {
                         focusedField = nil
                         KeyboardDismisser.dismiss()
                     }
@@ -418,11 +426,11 @@ public struct WishlistItemFormView: View {
             }
             dismiss()
         } catch Store.WishlistError.emptyName {
-            errorMessage = "Nome é obrigatório."
+            errorMessage = store.t(.nameRequired)
         } catch Store.WishlistError.invalidPrice {
-            errorMessage = "Preço deve ser maior que zero."
+            errorMessage = store.t(.wishErrPrice)
         } catch {
-            errorMessage = "Não foi possível salvar."
+            errorMessage = store.t(.couldNotSave)
         }
     }
 
@@ -438,9 +446,9 @@ public struct WishlistItemFormView: View {
         do {
             try store.updateItem(copy)
             _ = try store.generatePayable(itemID: copy.id)
-            generatedMessage = "Conta a pagar criada em Transações ✅"
+            generatedMessage = store.t(.wishGenerated)
         } catch {
-            errorMessage = "Não foi possível gerar a conta."
+            errorMessage = store.t(.wishErrGenerate)
         }
     }
 }

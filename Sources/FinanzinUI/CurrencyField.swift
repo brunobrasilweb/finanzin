@@ -1,28 +1,44 @@
 import SwiftUI
 import Foundation
+import FinanzinCore
 
-/// Campo monetário com máscara BRL em tempo real (pt-BR).
-/// Digite apenas números e o valor é formatado como "R$ 1.234,56".
+/// Campo monetário com máscara em tempo real, na moeda configurada.
+/// Digite apenas números e o valor é formatado (ex.: "R$ 1.234,56").
 /// Uso: `CurrencyField(value: $amountDecimal)` onde amount é `Decimal`.
 public struct CurrencyField: View {
     @Binding var value: Decimal
-    var placeholder: String = "R$ 0,00"
+    /// Placeholder manual; `nil` = zero formatado na moeda ativa.
+    var placeholder: String?
     /// Mostra o botão OK sobre o teclado. Desligue quando o formulário
     /// já tem um OK próprio (para não duplicar).
     var showKeyboardToolbar: Bool = true
+    var okTitle: String = "OK"
+    var currencyCode: String = "BRL"
+    var localeIdentifier: String = "pt_BR"
 
     @State private var text: String = ""
     @State private var didInit = false
     @FocusState private var isFocused: Bool
 
-    public init(value: Binding<Decimal>, placeholder: String = "R$ 0,00", showKeyboardToolbar: Bool = true) {
+    public init(
+        value: Binding<Decimal>, placeholder: String? = nil,
+        showKeyboardToolbar: Bool = true, okTitle: String = "OK",
+        currencyCode: String = "BRL", localeIdentifier: String = "pt_BR"
+    ) {
         _value = value
         self.placeholder = placeholder
         self.showKeyboardToolbar = showKeyboardToolbar
+        self.okTitle = okTitle
+        self.currencyCode = currencyCode
+        self.localeIdentifier = localeIdentifier
+    }
+
+    private var effectivePlaceholder: String {
+        placeholder ?? Self.format(0, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
     }
 
     public var body: some View {
-        TextField(placeholder, text: $text)
+        TextField(effectivePlaceholder, text: $text)
             .focused($isFocused)
             .monospacedDigit()
             #if os(iOS)
@@ -30,7 +46,7 @@ public struct CurrencyField: View {
             #endif
             .onAppear {
                 if !didInit {
-                    text = Self.format(value)
+                    text = Self.format(value, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
                     didInit = true
                 }
             }
@@ -48,7 +64,7 @@ public struct CurrencyField: View {
                 let cents = Int(trimmed) ?? 0
                 let newDecimal = Decimal(cents) / 100
                 value = newDecimal
-                let formatted = Self.format(newDecimal)
+                let formatted = Self.format(newDecimal, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
                 if formatted != newValue {
                     text = formatted
                 }
@@ -56,7 +72,7 @@ public struct CurrencyField: View {
             .onChange(of: value) { _, newValue in
                 // Sincroniza quando o valor muda de fora (ex.: edição) e o campo não está focado.
                 if !isFocused {
-                    let formatted = Self.format(newValue)
+                    let formatted = Self.format(newValue, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
                     if formatted != text {
                         text = formatted
                     }
@@ -67,7 +83,7 @@ public struct CurrencyField: View {
                     if showKeyboardToolbar {
                         ToolbarItemGroup(placement: .keyboard) {
                             Spacer()
-                            Button("OK") { isFocused = false }
+                            Button(okTitle) { isFocused = false }
                         }
                     }
                 #endif
@@ -75,13 +91,11 @@ public struct CurrencyField: View {
     }
 
     public static func format(_ value: Decimal) -> String {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "pt_BR")
-        f.numberStyle = .currency
-        f.currencyCode = "BRL"
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        return f.string(from: value as NSDecimalNumber) ?? "R$ 0,00"
+        format(value, currencyCode: "BRL", localeIdentifier: "pt_BR")
+    }
+
+    public static func format(_ value: Decimal, currencyCode: String, localeIdentifier: String) -> String {
+        Currency.format(value, currencyCode: currencyCode, localeIdentifier: localeIdentifier)
     }
 }
 
@@ -90,15 +104,29 @@ public struct ProminentCurrencyField: View {
     @Binding var value: Decimal
     var tint: Color
     var showKeyboardToolbar: Bool = true
+    var okTitle: String = "OK"
+    var currencyCode: String = "BRL"
+    var localeIdentifier: String = "pt_BR"
 
-    public init(value: Binding<Decimal>, tint: Color, showKeyboardToolbar: Bool = true) {
+    public init(
+        value: Binding<Decimal>, tint: Color, showKeyboardToolbar: Bool = true,
+        okTitle: String = "OK",
+        currencyCode: String = "BRL", localeIdentifier: String = "pt_BR"
+    ) {
         _value = value
         self.tint = tint
         self.showKeyboardToolbar = showKeyboardToolbar
+        self.okTitle = okTitle
+        self.currencyCode = currencyCode
+        self.localeIdentifier = localeIdentifier
     }
 
     public var body: some View {
-        CurrencyField(value: $value, showKeyboardToolbar: showKeyboardToolbar)
+        CurrencyField(
+            value: $value, showKeyboardToolbar: showKeyboardToolbar,
+            okTitle: okTitle,
+            currencyCode: currencyCode, localeIdentifier: localeIdentifier
+        )
             .font(.system(size: 34, weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
             .foregroundStyle(tint)

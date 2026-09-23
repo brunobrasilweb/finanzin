@@ -19,7 +19,7 @@ public struct FundListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.md) {
-                ScreenHeader("Fundos") {
+                ScreenHeader(store.t(.funds)) {
                     if showClose {
                         HeaderButton("xmark") { dismiss() }
                     }
@@ -28,8 +28,8 @@ public struct FundListView: View {
                 }
                 if store.funds.isEmpty {
                     EmptyStateView(
-                        title: "Sem fundos",
-                        subtitle: "Crie um fundo para separar reservas (ex.: Viagem, Emergência).",
+                        title: store.t(.fundEmptyTitle),
+                        subtitle: store.t(.fundEmptySubtitle),
                         icon: "chart.pie.fill"
                     )
                 } else {
@@ -41,18 +41,18 @@ public struct FundListView: View {
                                     Button(role: .destructive) {
                                         do { try store.deleteFund(id: fund.id) }
                                         catch Store.FundError.hasMovements {
-                                            alertMessage = "“\(fund.name)” tem movimentações e não pode ser excluído (histórico preservado)."
+                                            alertMessage = String(format: store.t(.fundDeleteBlocked), fund.name)
                                         } catch {
-                                            alertMessage = "Não foi possível excluir."
+                                            alertMessage = store.t(.fundDeleteFailed)
                                         }
                                     } label: {
-                                        Label("Excluir", systemImage: "trash")
+                                        Label(store.t(.delete), systemImage: "trash")
                                     }
                                     .tint(.red)
                                     Button {
                                         editing = fund
                                     } label: {
-                                        Label("Editar", systemImage: "pencil")
+                                        Label(store.t(.edit), systemImage: "pencil")
                                     }
                                     .tint(.blue)
                                 }
@@ -71,11 +71,11 @@ public struct FundListView: View {
                     FundDetailView(fundID: id)
                 }
             }
-            .alert("Atenção", isPresented: Binding(
+            .alert(store.t(.fundAttention), isPresented: Binding(
                 get: { alertMessage != nil },
                 set: { if !$0 { alertMessage = nil } }
             )) {
-                Button("OK") {}
+                Button(store.t(.ok)) {}
             } message: {
                 Text(alertMessage ?? "")
             }
@@ -89,12 +89,16 @@ public struct FundListView: View {
                 Text(fund.name)
                     .font(.subheadline.bold())
                     .foregroundStyle(VercelTheme.textPrimary)
-                Text("\(store.fundTransactions(fundID: fund.id).count) movimentações")
+                Text(String(format: store.t(.fundMovementsCount), store.fundTransactions(fundID: fund.id).count))
                     .font(.caption).foregroundStyle(VercelTheme.textSecondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                AmountText(store.balance(of: fund.id) ?? fund.initialAmount, style: .subheadline, hidden: store.valuesHidden)
+                AmountText(
+                    store.balance(of: fund.id) ?? fund.initialAmount, style: .subheadline, hidden: store.valuesHidden,
+                    currencyCode: store.settings.currency.currencyCode,
+                    localeIdentifier: store.settings.currency.localeIdentifier
+                )
                 Image(systemName: "chevron.right")
                     .font(.caption2.bold())
                     .foregroundStyle(VercelTheme.textTertiary)
@@ -131,21 +135,25 @@ public struct FundFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section("Dados") {
-                        TextField("Nome (ex.: Viagem)", text: $name)
+                    Section(store.t(.dataSection)) {
+                        TextField(store.t(.fundNamePh), text: $name)
                             .focused($focusedField, equals: .name)
                             .submitLabel(.next)
                             .onSubmit { focusedField = .notes }
-                        CurrencyField(value: $initialAmount, showKeyboardToolbar: false)
-                        TextField("Observações", text: $notes)
+                        CurrencyField(
+                            value: $initialAmount, showKeyboardToolbar: false,
+                            currencyCode: store.settings.currency.currencyCode,
+                            localeIdentifier: store.settings.currency.localeIdentifier
+                        )
+                        TextField(store.t(.notesField), text: $notes)
                             .focused($focusedField, equals: .notes)
                             .submitLabel(.done)
                             .onSubmit { focusedField = nil }
                     }
-                    Section("Cor (\(CategoryPalettes.colors.count) cores)") {
+                    Section(String(format: store.t(.colorsCount), CategoryPalettes.colors.count)) {
                         ColorOptionsGrid(selection: $color)
                     }
-                    Section("Ícone (\(CategoryPalettes.icons.count) ícones)") {
+                    Section(String(format: store.t(.iconsCount), CategoryPalettes.icons.count)) {
                         IconOptionsGrid(selection: $icon, tintHex: color)
                     }
                     if let errorMessage {
@@ -153,22 +161,22 @@ public struct FundFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? "Novo fundo" : "Editar fundo")
+            .navigationTitle(editing == nil ? store.t(.fundNewTitle) : store.t(.fundEditTitle))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { save() }
+                    Button(store.t(.save)) { save() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") {
+                    Button(store.t(.ok)) {
                         focusedField = nil
                         KeyboardDismisser.dismiss()
                     }
@@ -196,11 +204,11 @@ public struct FundFormView: View {
             }
             dismiss()
         } catch Store.FundError.emptyName {
-            errorMessage = "Nome é obrigatório."
+            errorMessage = store.t(.nameRequired)
         } catch Store.FundError.invalidAmount {
-            errorMessage = "Valor inicial não pode ser negativo."
+            errorMessage = store.t(.fundErrAmount)
         } catch {
-            errorMessage = "Não foi possível salvar."
+            errorMessage = store.t(.couldNotSave)
         }
     }
 }
@@ -226,7 +234,7 @@ public struct FundDetailView: View {
                             Text(store.maskedAmount(store.balance(of: fund.id) ?? fund.initialAmount))
                                 .font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
                                 .foregroundStyle(VercelTheme.textPrimary)
-                            Text("inicial \(store.maskedAmount(fund.initialAmount))")
+                            Text(String(format: store.t(.fundInitial), store.maskedAmount(fund.initialAmount)))
                                 .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                             if let notes = fund.notes, !notes.isEmpty {
                                 Text(notes).font(.footnote).foregroundStyle(VercelTheme.textSecondary)
@@ -235,7 +243,7 @@ public struct FundDetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     }
-                    Section("Movimentações") {
+                    Section(store.t(.fundMovementsSection)) {
                         ForEach(store.fundTransactions(fundID: fund.id)) { t in
                             HStack(spacing: FinSpacing.md) {
                                 TintedIcon(
@@ -248,10 +256,10 @@ public struct FundDetailView: View {
                                         .font(.subheadline.bold())
                                         .foregroundStyle(VercelTheme.textPrimary)
                                         .lineLimit(1)
-                                    Text(Format.shortDate(t.dueDate)).font(.caption).foregroundStyle(VercelTheme.textTertiary)
+                                    Text(Format.shortDate(t.dueDate, localeIdentifier: store.lang.localeIdentifier)).font(.caption).foregroundStyle(VercelTheme.textTertiary)
                                 }
                                 Spacer()
-                                Text(store.valuesHidden ? "••••••" : "\(t.fundMovementType == .withdrawal ? "−" : "+")\(Format.currency(t.amount))")
+                                Text(store.valuesHidden ? "••••••" : "\(t.fundMovementType == .withdrawal ? "−" : "+")\(Format.currency(t.amount, currencyCode: store.settings.currency.currencyCode, localeIdentifier: store.settings.currency.localeIdentifier))")
                                     .font(.subheadline.bold())
                                     .monospacedDigit()
                                     .foregroundStyle(t.fundMovementType == .withdrawal ? .orange : .green)
@@ -261,13 +269,13 @@ public struct FundDetailView: View {
                                 Button(role: .destructive) {
                                     store.deleteTransactions(ids: [t.id])
                                 } label: {
-                                    Label("Excluir", systemImage: "trash")
+                                    Label(store.t(.delete), systemImage: "trash")
                                 }
                                 .tint(.red)
                                 Button {
                                     editingTx = t
                                 } label: {
-                                    Label("Editar", systemImage: "pencil")
+                                    Label(store.t(.edit), systemImage: "pencil")
                                 }
                                 .tint(.blue)
                             }
@@ -284,8 +292,9 @@ public struct FundDetailView: View {
                         } label: {
                             Image(systemName: store.valuesHidden ? "eye.slash" : "eye")
                         }
-                        Button("Sacar") { movement = .withdrawal }
-                        Button("Aportar") { movement = .application }
+                        .accessibilityLabel(store.valuesHidden ? store.t(.showValues) : store.t(.hideValues))
+                        Button(store.t(.fundWithdraw)) { movement = .withdrawal }
+                        Button(store.t(.fundDeposit)) { movement = .application }
                     }
                 }
                 .sheet(item: $movement) { kind in
@@ -298,7 +307,7 @@ public struct FundDetailView: View {
                         .environmentObject(store)
                 }
             } else {
-                EmptyStateView(title: "Fundo removido", subtitle: "Volte para a lista.", icon: "chart.pie.fill")
+                EmptyStateView(title: store.t(.fundRemovedTitle), subtitle: store.t(.fundRemovedSubtitle), icon: "chart.pie.fill")
             }
         }
         .finBackground()
@@ -328,20 +337,28 @@ public struct FundMovementView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section(movement == .application ? "Aporte (conta a pagar)" : "Saque") {
-                        TextField("Descrição", text: $description)
+                    Section(movement == .application ? store.t(.fundDepositSection) : store.t(.fundWithdraw)) {
+                        TextField(store.t(.descriptionField), text: $description)
                             .focused($descriptionFocused)
                             .submitLabel(.done)
                             .onSubmit { descriptionFocused = false }
-                        CurrencyField(value: $amount, showKeyboardToolbar: false)
-                        FormDateField("Data", date: $date)
+                        CurrencyField(
+                            value: $amount, showKeyboardToolbar: false,
+                            currencyCode: store.settings.currency.currencyCode,
+                            localeIdentifier: store.settings.currency.localeIdentifier
+                        )
+                        FormDateField(
+                            store.t(.fundDate), date: $date,
+                            localeIdentifier: store.lang.localeIdentifier,
+                            okTitle: store.t(.ok)
+                        )
                         if movement == .withdrawal,
                            let bal = store.balance(of: fundID)
                         {
-                            Text("Disponível: \(store.maskedAmount(bal))")
+                            Text(String(format: store.t(.fundAvailable), store.maskedAmount(bal)))
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                         }
-                        Text("Será lançada como conta a pagar vinculada ao fundo.")
+                        Text(store.t(.fundLinkedFootnote))
                             .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                     }
                     if let errorMessage {
@@ -349,22 +366,22 @@ public struct FundMovementView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(movement == .application ? "Aportar" : "Sacar")
+            .navigationTitle(movement == .application ? store.t(.fundDeposit) : store.t(.fundWithdraw))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { save() }
+                    Button(store.t(.save)) { save() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") {
+                    Button(store.t(.ok)) {
                         descriptionFocused = false
                         KeyboardDismisser.dismiss()
                     }
@@ -375,7 +392,9 @@ public struct FundMovementView: View {
                 if description.isEmpty,
                    let fund = store.funds.first(where: { $0.id == fundID })
                 {
-                    description = movement == .application ? "Aporte \(fund.name)" : "Saque \(fund.name)"
+                    description = movement == .application
+                        ? String(format: store.t(.fundDefaultDeposit), fund.name)
+                        : String(format: store.t(.fundDefaultWithdraw), fund.name)
                 }
             }
         }
@@ -389,13 +408,13 @@ public struct FundMovementView: View {
             )
             dismiss()
         } catch Store.FundError.emptyName {
-            errorMessage = "Descrição é obrigatória."
+            errorMessage = store.t(.fundDescriptionRequired)
         } catch Store.FundError.invalidAmount {
-            errorMessage = "Valor deve ser maior que zero."
+            errorMessage = store.t(.fundErrPositive)
         } catch Store.FundError.insufficientBalance {
-            errorMessage = "Saldo insuficiente para este saque."
+            errorMessage = store.t(.fundErrBalance)
         } catch {
-            errorMessage = "Não foi possível salvar."
+            errorMessage = store.t(.couldNotSave)
         }
     }
 }

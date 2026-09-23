@@ -35,22 +35,22 @@ public struct CategoryListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.md) {
-                ScreenHeader("Categorias") {
+                ScreenHeader(store.t(.catTitle)) {
                     HeaderButton("xmark") { dismiss() }
                     HeaderButton("plus") { showingForm = true }
                 }
-                Picker("Tipo", selection: $filter) {
-                    Text("Todas").tag(nil as CategoryType?)
-                    Text("Despesas").tag(CategoryType.expense as CategoryType?)
-                    Text("Receitas").tag(CategoryType.income as CategoryType?)
+                Picker(store.t(.typeLabel), selection: $filter) {
+                    Text(store.t(.all)).tag(nil as CategoryType?)
+                    Text(store.t(.catExpensesPlural)).tag(CategoryType.expense as CategoryType?)
+                    Text(store.t(.catIncomePlural)).tag(CategoryType.income as CategoryType?)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, FinSpacing.lg)
 
                 if filtered.isEmpty {
                     EmptyStateView(
-                        title: "Sem categorias",
-                        subtitle: "Toque em + para criar a primeira.",
+                        title: store.t(.catEmptyTitle),
+                        subtitle: store.t(.catEmptySubtitle),
                         icon: "tag"
                     )
                 } else {
@@ -62,7 +62,7 @@ public struct CategoryListView: View {
                                     Text(cat.name)
                                         .font(.subheadline.bold())
                                         .foregroundStyle(VercelTheme.textPrimary)
-                                    Text(cat.type.label)
+                                    Text(cat.type.label(language: store.lang))
                                         .font(.caption)
                                         .foregroundStyle(VercelTheme.textSecondary)
                                 }
@@ -76,13 +76,13 @@ public struct CategoryListView: View {
                                 Button(role: .destructive) {
                                     store.deleteCategory(id: cat.id)
                                 } label: {
-                                    Label("Excluir", systemImage: "trash")
+                                    Label(store.t(.delete), systemImage: "trash")
                                 }
                                 .tint(.red)
                                 Button {
                                     editing = cat
                                 } label: {
-                                    Label("Editar", systemImage: "pencil")
+                                    Label(store.t(.edit), systemImage: "pencil")
                                 }
                                 .tint(.blue)
                             }
@@ -136,20 +136,20 @@ public struct CategoryFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section("Dados") {
-                        TextField("Nome", text: $name)
+                    Section(store.t(.dataSection)) {
+                        TextField(store.t(.nameField), text: $name)
                             .focused($nameFocused)
                             .submitLabel(.done)
                             .onSubmit { nameFocused = false }
-                        Picker("Tipo", selection: $type) {
-                            Text("Despesa").tag(CategoryType.expense)
-                            Text("Receita").tag(CategoryType.income)
+                        Picker(store.t(.typeLabel), selection: $type) {
+                            Text(CategoryType.expense.label(language: store.lang)).tag(CategoryType.expense)
+                            Text(CategoryType.income.label(language: store.lang)).tag(CategoryType.income)
                         }
                     }
-                    Section("Cor (\(CategoryPalettes.colors.count) cores)") {
+                    Section(String(format: store.t(.colorsCount), CategoryPalettes.colors.count)) {
                         ColorOptionsGrid(selection: $color)
                     }
-                    Section("Ícone (\(CategoryPalettes.icons.count) ícones)") {
+                    Section(String(format: store.t(.iconsCount), CategoryPalettes.icons.count)) {
                         IconOptionsGrid(selection: $icon, tintHex: color)
                     }
                     if let errorMessage {
@@ -157,25 +157,25 @@ public struct CategoryFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? "Nova categoria" : "Editar categoria")
+            .navigationTitle(editing == nil ? store.t(.catNewTitle) : store.t(.catEditTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { save() }
+                    Button(store.t(.save)) { save() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") {
+                    Button(store.t(.ok)) {
                         nameFocused = false
                         KeyboardDismisser.dismiss()
                     }
@@ -200,11 +200,11 @@ public struct CategoryFormView: View {
             }
             dismiss()
         } catch Store.CategoryError.emptyName {
-            errorMessage = "Nome é obrigatório."
+            errorMessage = store.t(.nameRequired)
         } catch Store.CategoryError.duplicateName {
-            errorMessage = "Já existe uma categoria com esse nome para este tipo."
+            errorMessage = store.t(.catErrDuplicate)
         } catch {
-            errorMessage = "Não foi possível salvar."
+            errorMessage = store.t(.couldNotSave)
         }
     }
 }
@@ -234,7 +234,7 @@ public struct ColorOptionsGrid: View {
                 }
                 .overlay(
                     Circle()
-                        .stroke(Color.white, lineWidth: isSelected ? 2.5 : 0)
+                        .stroke(Color.primary, lineWidth: isSelected ? 2.5 : 0)
                         .frame(width: 42, height: 42)
                 )
                 .frame(width: 44, height: 44)
@@ -267,8 +267,8 @@ public struct IconOptionsGrid: View {
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(isSelected
-                                ? (tintHex.map(VercelTheme.hex) ?? Color.white.opacity(0.25))
-                                : Color.white.opacity(0.06))
+                                ? (tintHex.map(VercelTheme.hex) ?? Color.gray.opacity(0.3))
+                                : VercelTheme.inset)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(isSelected ? Color.white.opacity(0.6) : VercelTheme.border, lineWidth: 1)

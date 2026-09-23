@@ -497,6 +497,130 @@ func testStoreCreateUniqueAndToggle() {
     check(store.transactions[0].paidDate == nil, "reabrir limpa paidDate")
 }
 
+// MARK: - Sprint 7: configurações
+
+func testAppSettingsDefaults() {
+    let s = AppSettings.defaults
+    check(s.language == .ptBR, "idioma default pt-BR")
+    check(s.currency == .BRL, "moeda default BRL")
+    check(s.theme == .system, "tema default sistema")
+    check(!s.notifications.isAnyEnabled, "notificações default desligadas")
+    check(s.notifications.hour == 9 && s.notifications.minute == 0, "hora default 09:00")
+}
+
+func testAppSettingsRoundTrip() {
+    let s = AppSettings(
+        language: .en, currency: .JPY, theme: .dark,
+        notifications: NotificationPrefs(
+            overdueDailyEnabled: true, payDueDayEnabled: true,
+            receiveDueDayEnabled: true, hour: 20, minute: 30
+        )
+    )
+    let data = try! JSONEncoder().encode(s)
+    let back = try! JSONDecoder().decode(AppSettings.self, from: data)
+    check(back == s, "settings sobrevive ao JSON round-trip")
+}
+
+func testStoreSettingsUpdateAndReset() {
+    let store = Store(seedIfEmpty: false)
+    let original = store.settings
+    store.updateCurrency(.EUR)
+    check(store.settings.currency == .EUR, "moeda atualiza")
+    store.updateLanguage(.en)
+    check(store.settings.language == .en, "idioma atualiza")
+    store.updateTheme(.light)
+    check(store.settings.theme == .light, "tema atualiza")
+    store.resetSettings()
+    check(store.settings == .defaults, "reset volta aos padrões")
+    store.replaceSettings(original)
+}
+
+func testCurrencyFiveFormats() {
+    let v = Decimal(string: "1234.56") ?? 0
+    for c in AppCurrency.allCases {
+        let s = Currency.format(v, currencyCode: c.currencyCode, localeIdentifier: c.localeIdentifier)
+        check(s.contains(c.symbol), "\(c.rawValue) contém \(c.symbol) (obtido \(s))")
+    }
+}
+
+func testL10nCoverage() {
+    for key in L10nKey.allCases {
+        let pt = L10n.t(key, .ptBR)
+        let en = L10n.t(key, .en)
+        check(!pt.isEmpty && !en.isEmpty, "\(key.rawValue) traduzido nos 2 idiomas")
+    }
+    check(L10n.t(.settingsTitle, .ptBR) != L10n.t(.settingsTitle, .en), "título difere entre idiomas")
+    check(TransactionType.payable.label(language: .en) == "Payable", "enum traduzido")
+    check(ThemeMode.dark.label(language: .en) == "Dark", "tema traduzido")
+}
+
+func testNotificationPlannerOff() {
+    let tx = [FinancialTransaction(description: "X", type: .payable, amount: 10, dueDate: D(2026, 10, 1))]
+    check(NotificationPlanner.plans(transactions: tx, settings: .defaults).isEmpty, "tudo desligado → vazio")
+}
+
+func testValidateEnglish() {
+    check(TransactionEngine.validate(description: "  ", amount: 10, language: .en) == ["Description is required."], "erro EN descrição")
+    check(TransactionEngine.validate(description: "X", amount: -1, language: .en) == ["Amount cannot be negative."], "erro EN valor")
+    check(TransactionEngine.validate(description: "  ", amount: 10) == ["Descrição é obrigatória."], "default segue PT")
+    check(!TransactionEngine.validateSeries(recurrence: .installment, count: 1, interval: nil, language: .en).isEmpty, "série EN tem erros")
+    check(TransactionEngine.validateSeries(recurrence: .installment, count: 1, interval: nil, language: .en)[0].contains("Installments"), "série EN traduzida")
+    check(TransactionEngine.validateSettle(amount: -1, language: .en) == ["Settlement amount cannot be negative."], "baixa EN")
+}
+
+func testEvolutionLocale() {
+    let tx: [FinancialTransaction] = [
+        .init(description: "Out", type: .payable, amount: 100, dueDate: D(2026, 10, 3), status: .paid),
+    ]
+    let pt = MetricsService.evolution(tx, months: 1, base: D(2026, 10, 15))
+    let en = MetricsService.evolution(tx, months: 1, base: D(2026, 10, 15), localeIdentifier: "en_US")
+    check(pt[0].label != en[0].label, "rótulo do mês muda com locale (\(pt[0].label) vs \(en[0].label))")
+    check(en[0].label.contains("Oct"), "EN usa Oct (obtido \(en[0].label))")
+}
+
+func testResetToDefaults() {
+    let store = Store(seedIfEmpty: false)
+    let cat = try! store.addCategory(name: "Minha", type: .expense, color: "#fff", icon: "x")
+    _ = store.create(.init(description: "Conta", type: .payable, categoryID: cat.id, amount: 10, dueDate: D(2026, 10, 1)))
+    let fund = try! store.addFund(name: "F", initialAmount: 5, color: "#fff", icon: "x", notes: nil)
+    try! store.saveBudget(categoryID: cat.id, month: 10, year: 2026, limitAmount: 100)
+    let list = try! store.addWishlist(name: "L", color: "#fff", icon: "x")
+    try! store.addItem(wishlistID: list.id, name: "I", price: 10, priority: .low, categoryID: nil, notes: nil)
+    let settingsBefore = store.settings
+    store.resetToDefaults()
+    check(store.transactions.isEmpty, "transações apagadas")
+    check(store.funds.isEmpty, "fundos apagados")
+    check(store.budgets.isEmpty, "orçamentos apagados")
+    check(store.wishlists.isEmpty && store.wishlistItems.isEmpty, "listas apagadas")
+    check(store.categories.count == 8, "só as 8 categorias padrão (obtido \(store.categories.count))")
+    check(store.settings == settingsBefore, "preferências preservadas")
+}
+
+func testNotificationPlannerKinds() {    let cal = Calendar.current
+    let today = cal.startOfDay(for: Date())
+    func day(_ offset: Int) -> Date { cal.date(byAdding: .day, value: offset, to: today)! }
+    let tx = [
+        FinancialTransaction(description: "Vencida", type: .payable, amount: 100, dueDate: day(-5)),
+        FinancialTransaction(description: "Boleto hoje", type: .payable, amount: 50, dueDate: today),
+        FinancialTransaction(description: "Salário hoje", type: .receivable, amount: 200, dueDate: today),
+        FinancialTransaction(description: "Quitada", type: .payable, amount: 10, dueDate: today, status: .paid),
+        FinancialTransaction(description: "Distante", type: .payable, amount: 10, dueDate: day(90)),
+    ]
+    var s = AppSettings.defaults
+    s.notifications = NotificationPrefs(
+        overdueDailyEnabled: true, payDueDayEnabled: true,
+        receiveDueDayEnabled: true, hour: 9, minute: 0
+    )
+    let plans = NotificationPlanner.plans(transactions: tx, settings: s, now: Date())
+    let kinds = Set(plans.map(\.kind))
+    check(kinds == [.overdueDaily, .payDueDay, .receiveDueDay], "3 tipos planejados")
+    check(plans.filter { $0.kind == .overdueDaily }.count == 1, "1 resumo diário recorrente")
+    check(plans.first { $0.kind == .overdueDaily }?.repeats == true, "resumo repete")
+    check(!plans.contains { $0.body.contains("Quitada") }, "paga fora")
+    check(!plans.contains { $0.body.contains("Distante") }, "fora do horizonte fora")
+    check(!plans.contains { $0.body.contains("Vencida") && $0.kind != .overdueDaily }, "vencida só no resumo")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -534,6 +658,16 @@ struct TestRunner {
             ("testBreakdownPercentages", testBreakdownPercentages),
             ("testEvolutionEndsAtBaseMonth", testEvolutionEndsAtBaseMonth),
             ("testUpcomingWindow", testUpcomingWindow),
+            ("testAppSettingsDefaults", testAppSettingsDefaults),
+            ("testAppSettingsRoundTrip", testAppSettingsRoundTrip),
+            ("testStoreSettingsUpdateAndReset", testStoreSettingsUpdateAndReset),
+            ("testCurrencyFiveFormats", testCurrencyFiveFormats),
+            ("testL10nCoverage", testL10nCoverage),
+            ("testNotificationPlannerOff", testNotificationPlannerOff),
+            ("testNotificationPlannerKinds", testNotificationPlannerKinds),
+            ("testValidateEnglish", testValidateEnglish),
+            ("testEvolutionLocale", testEvolutionLocale),
+            ("testResetToDefaults", testResetToDefaults),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

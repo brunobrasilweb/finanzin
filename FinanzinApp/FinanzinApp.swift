@@ -16,8 +16,8 @@ import FinanzinUI
 struct FinanzinApp: App {
     var body: some Scene {
         WindowGroup {
+            // Tema/idioma vêm de `Store.settings` (RootTabView aplica).
             RootTabView()
-                .preferredColorScheme(.dark)
         }
     }
 }

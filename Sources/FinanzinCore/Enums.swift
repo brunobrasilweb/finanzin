@@ -6,10 +6,14 @@ public enum TransactionType: String, CaseIterable, Codable, Sendable {
     case receivable
     case payable
 
-    public var label: String {
-        switch self {
-        case .receivable: "A Receber"
-        case .payable: "A Pagar"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.receivable, .en): "Receivable"
+        case (.payable, .en): "Payable"
+        case (.receivable, .ptBR): "A Receber"
+        case (.payable, .ptBR): "A Pagar"
         }
     }
 }
@@ -21,12 +25,18 @@ public enum RecurrenceType: String, CaseIterable, Codable, Sendable {
     case recurring
     case installment
 
-    public var label: String {
-        switch self {
-        case .unique: "Única"
-        case .fixed: "Fixa"
-        case .recurring: "Recorrente"
-        case .installment: "Parcelada"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.unique, .en): "One-time"
+        case (.fixed, .en): "Fixed"
+        case (.recurring, .en): "Recurring"
+        case (.installment, .en): "Installments"
+        case (.unique, .ptBR): "Única"
+        case (.fixed, .ptBR): "Fixa"
+        case (.recurring, .ptBR): "Recorrente"
+        case (.installment, .ptBR): "Parcelada"
         }
     }
 }
@@ -37,12 +47,18 @@ public enum InstallmentInterval: String, CaseIterable, Codable, Sendable {
     case monthly
     case yearly
 
-    public var label: String {
-        switch self {
-        case .weekly: "Semanal"
-        case .biweekly: "Quinzenal"
-        case .monthly: "Mensal"
-        case .yearly: "Anual"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.weekly, .en): "Weekly"
+        case (.biweekly, .en): "Biweekly"
+        case (.monthly, .en): "Monthly"
+        case (.yearly, .en): "Yearly"
+        case (.weekly, .ptBR): "Semanal"
+        case (.biweekly, .ptBR): "Quinzenal"
+        case (.monthly, .ptBR): "Mensal"
+        case (.yearly, .ptBR): "Anual"
         }
     }
 }
@@ -53,12 +69,18 @@ public enum TransactionStatus: String, CaseIterable, Codable, Sendable {
     case canceled
     case overdue
 
-    public var label: String {
-        switch self {
-        case .pending: "Pendente"
-        case .paid: "Pago"
-        case .canceled: "Cancelado"
-        case .overdue: "Vencido"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.pending, .en): "Pending"
+        case (.paid, .en): "Paid"
+        case (.canceled, .en): "Canceled"
+        case (.overdue, .en): "Overdue"
+        case (.pending, .ptBR): "Pendente"
+        case (.paid, .ptBR): "Pago"
+        case (.canceled, .ptBR): "Cancelado"
+        case (.overdue, .ptBR): "Vencido"
         }
     }
 }
@@ -67,10 +89,14 @@ public enum CategoryType: String, CaseIterable, Codable, Sendable {
     case income
     case expense
 
-    public var label: String {
-        switch self {
-        case .income: "Receita"
-        case .expense: "Despesa"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.income, .en): "Income"
+        case (.expense, .en): "Expense"
+        case (.income, .ptBR): "Receita"
+        case (.expense, .ptBR): "Despesa"
         }
     }
 }
@@ -79,10 +105,14 @@ public enum FundMovementType: String, CaseIterable, Codable, Sendable {
     case application
     case withdrawal
 
-    public var label: String {
-        switch self {
-        case .application: "Aplicação"
-        case .withdrawal: "Saque"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.application, .en): "Deposit"
+        case (.withdrawal, .en): "Withdrawal"
+        case (.application, .ptBR): "Aplicação"
+        case (.withdrawal, .ptBR): "Saque"
         }
     }
 }
@@ -92,11 +122,16 @@ public enum WishlistPriority: String, CaseIterable, Codable, Sendable {
     case medium
     case high
 
-    public var label: String {
-        switch self {
-        case .low: "Baixa"
-        case .medium: "Média"
-        case .high: "Alta"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.low, .en): "Low"
+        case (.medium, .en): "Medium"
+        case (.high, .en): "High"
+        case (.low, .ptBR): "Baixa"
+        case (.medium, .ptBR): "Média"
+        case (.high, .ptBR): "Alta"
         }
     }
 }
@@ -107,11 +142,16 @@ public enum EditScope: String, CaseIterable, Codable, Sendable {
     case future
     case all
 
-    public var label: String {
-        switch self {
-        case .thisOne: "Somente esta"
-        case .future: "Esta e as próximas"
-        case .all: "Todas"
+    public var label: String { label(language: .ptBR) }
+
+    public func label(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.thisOne, .en): "This one only"
+        case (.future, .en): "This and following"
+        case (.all, .en): "All"
+        case (.thisOne, .ptBR): "Somente esta"
+        case (.future, .ptBR): "Esta e as próximas"
+        case (.all, .ptBR): "Todas"
         }
     }
 }

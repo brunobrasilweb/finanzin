@@ -53,7 +53,7 @@ public enum MetricsService {
         }.sorted { ($0.total as NSDecimalNumber).doubleValue > ($1.total as NSDecimalNumber).doubleValue }
     }
 
-    public static func evolution(_ all: [FinancialTransaction], months: Int = 6, base: Date = Date()) -> [MonthlyEvolution] {
+    public static func evolution(_ all: [FinancialTransaction], months: Int = 6, base: Date = Date(), localeIdentifier: String = "pt_BR") -> [MonthlyEvolution] {
         let comp = Dates.competence(of: base)
         var out: [MonthlyEvolution] = []
         for i in stride(from: months - 1, through: 0, by: -1) {
@@ -64,7 +64,7 @@ public enum MetricsService {
             {
                 if t.type == .receivable { inc += t.amount } else { exp += t.amount }
             }
-            out.append(MonthlyEvolution(month: m, year: y, label: Dates.monthLabel(year: y, month: m), income: inc, expense: exp))
+            out.append(MonthlyEvolution(month: m, year: y, label: Dates.monthLabel(year: y, month: m, localeIdentifier: localeIdentifier), income: inc, expense: exp))
         }
         return out
     }

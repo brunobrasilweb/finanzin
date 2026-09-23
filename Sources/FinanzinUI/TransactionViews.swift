@@ -27,11 +27,14 @@ public struct TransactionListView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: FinSpacing.sm) {
-                ScreenHeader("Transações") {
+                ScreenHeader(store.t(.txTitle)) {
                     PrivacyEyeButton()
                     HeaderButton("tag") { showingCategories = true }
                 }
-                MonthPicker(year: $year, month: $month)
+                MonthPicker(
+                    year: $year, month: $month,
+                    localeIdentifier: store.lang.localeIdentifier
+                )
                     .padding(.horizontal, FinSpacing.lg)
 
                 HStack(spacing: FinSpacing.sm) {
@@ -40,10 +43,10 @@ public struct TransactionListView: View {
                 }
                 .padding(.horizontal, FinSpacing.lg)
 
-                Picker("Tipo", selection: $typeFilter) {
-                    Text("Todas").tag(nil as TransactionType?)
-                    Text("A pagar").tag(TransactionType.payable as TransactionType?)
-                    Text("A receber").tag(TransactionType.receivable as TransactionType?)
+                Picker(store.t(.txTypeFilter), selection: $typeFilter) {
+                    Text(store.t(.all)).tag(nil as TransactionType?)
+                    Text(TransactionType.payable.label(language: store.lang)).tag(TransactionType.payable as TransactionType?)
+                    Text(TransactionType.receivable.label(language: store.lang)).tag(TransactionType.receivable as TransactionType?)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, FinSpacing.lg)
@@ -70,8 +73,8 @@ public struct TransactionListView: View {
 
                 if filtered.isEmpty {
                         EmptyStateView(
-                            title: "Sem transações",
-                            subtitle: "Toque em + para lançar a primeira conta do mês.",
+                            title: store.t(.txEmptyTitle),
+                            subtitle: store.t(.txEmptySubtitle),
                             icon: "arrow.left.arrow.right"
                         )
                     } else {
@@ -85,22 +88,22 @@ public struct TransactionListView: View {
                                         Button(role: .destructive) {
                                             pendingDelete = t
                                         } label: {
-                                            Label("Excluir", systemImage: "trash")
+                                            Label(store.t(.delete), systemImage: "trash")
                                         }
                                         .tint(.red)
                                         Button {
                                             editing = t
                                         } label: {
-                                            Label("Editar", systemImage: "pencil")
+                                            Label(store.t(.edit), systemImage: "pencil")
                                         }
                                         .tint(.blue)
                                     }
                                     .swipeActions(edge: .leading) {
                                         if t.status == .paid {
-                                            Button("Reabrir") { store.updateStatus(id: t.id, to: .pending) }
+                                            Button(store.t(.txReopen)) { store.updateStatus(id: t.id, to: .pending) }
                                                 .tint(.orange)
                                         } else {
-                                            Button("Dar baixa") { settling = t }
+                                            Button(store.t(.txSettle)) { settling = t }
                                                 .tint(.green)
                                         }
                                     }
@@ -120,7 +123,7 @@ public struct TransactionListView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") { searchFocused = false }
+                    Button(store.t(.ok)) { searchFocused = false }
                 }
             }
             #endif
@@ -137,7 +140,7 @@ public struct TransactionListView: View {
                     .environmentObject(store)
             }
             .confirmationDialog(
-                "Excluir conta",
+                store.t(.txDeleteAccount),
                 isPresented: Binding(
                     get: { pendingDelete != nil },
                     set: { if !$0 { pendingDelete = nil } }
@@ -145,25 +148,30 @@ public struct TransactionListView: View {
                 presenting: pendingDelete
             ) { t in
                 if store.isSeriesMember(t) {
-                    Button("\(EditScope.thisOne.label) (1)", role: .destructive) {
+                    Button("\(EditScope.thisOne.label(language: store.lang)) (1)", role: .destructive) {
                         store.deleteSeries(targetID: t.id, scope: .thisOne)
                     }
-                    Button("\(EditScope.future.label) (\(store.scopeCount(targetID: t.id, scope: .future)))", role: .destructive) {
+                    Button("\(EditScope.future.label(language: store.lang)) (\(store.scopeCount(targetID: t.id, scope: .future)))", role: .destructive) {
                         store.deleteSeries(targetID: t.id, scope: .future)
                     }
-                    Button("\(EditScope.all.label) (\(store.scopeCount(targetID: t.id, scope: .all)))", role: .destructive) {
+                    Button("\(EditScope.all.label(language: store.lang)) (\(store.scopeCount(targetID: t.id, scope: .all)))", role: .destructive) {
                         store.deleteSeries(targetID: t.id, scope: .all)
                     }
                 } else {
-                    Button("Excluir", role: .destructive) {
+                    Button(store.t(.delete), role: .destructive) {
                         store.deleteTransactions(ids: [t.id])
                     }
                 }
-                Button("Cancelar", role: .cancel) {}
+                Button(store.t(.cancel), role: .cancel) {}
             } message: { t in
                 Text(store.isSeriesMember(t)
-                    ? "“\(t.description)” é \(t.recurrence.label.lowercased()) e faz parte de uma série de \(store.seriesMembers(targetID: t.id).count) lançamentos. O que excluir?"
-                    : "Excluir “\(t.description)”?")
+                    ? String(
+                        format: store.t(.txDeleteConfirmSeries),
+                        t.description,
+                        t.recurrence.label(language: store.lang).lowercased(),
+                        store.seriesMembers(targetID: t.id).count
+                    )
+                    : String(format: store.t(.txDeleteConfirmSingle), t.description))
             }
         }
     }
@@ -176,7 +184,7 @@ public struct TransactionListView: View {
         HStack(spacing: FinSpacing.sm) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(VercelTheme.textTertiary)
-            TextField("Buscar", text: $search)
+            TextField(store.t(.search), text: $search)
                 .focused($searchFocused)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
@@ -202,21 +210,21 @@ public struct TransactionListView: View {
 
     private var filterButton: some View {
         Menu {
-            Section("Status") {
+            Section(store.t(.txStatusMenu)) {
                 Button { statusFilter = nil } label: {
-                    statusOption("Todas", active: statusFilter == nil)
+                    statusOption(store.t(.all), active: statusFilter == nil)
                 }
                 Button { statusFilter = .pending } label: {
-                    statusOption("Pendente", active: statusFilter == .pending)
+                    statusOption(TransactionStatus.pending.label(language: store.lang), active: statusFilter == .pending)
                 }
                 Button { statusFilter = .paid } label: {
-                    statusOption("Pago", active: statusFilter == .paid)
+                    statusOption(TransactionStatus.paid.label(language: store.lang), active: statusFilter == .paid)
                 }
             }
             if categoryID != nil {
-                Section("Categoria") {
+                Section(store.t(.txCategoryMenu)) {
                     Button(role: .destructive) { categoryID = nil } label: {
-                        Label("Limpar filtro", systemImage: "xmark")
+                        Label(store.t(.txClearFilter), systemImage: "xmark")
                     }
                 }
             }
@@ -294,10 +302,8 @@ public struct TransactionListView: View {
         parts.append(shortDate(t.dueDate))
         if let n = t.currentInstallment, t.recurrence == .installment {
             parts.append("\(n)/\(t.installmentCount)")
-        } else if t.recurrence == .fixed {
-            parts.append("Fixa")
-        } else if t.recurrence == .recurring {
-            parts.append("Recorrente")
+        } else if t.recurrence == .fixed || t.recurrence == .recurring {
+            parts.append(t.recurrence.label(language: store.lang))
         }
         return parts.joined(separator: " • ")
     }
@@ -305,13 +311,13 @@ public struct TransactionListView: View {
     private func statusLine(_ t: FinancialTransaction) -> some View {
         let (label, color): (String, Color) = {
             if t.isOverdue {
-                return ("Vencido", .red)
+                return (TransactionStatus.overdue.label(language: store.lang), .red)
             }
             switch t.status {
-            case .pending: return ("Pendente", .orange)
-            case .paid: return ("Pago", VercelTheme.textTertiary)
-            case .canceled: return ("Cancelado", .gray)
-            case .overdue: return ("Vencido", .red)
+            case .pending: return (TransactionStatus.pending.label(language: store.lang), .orange)
+            case .paid: return (TransactionStatus.paid.label(language: store.lang), VercelTheme.textTertiary)
+            case .canceled: return (TransactionStatus.canceled.label(language: store.lang), .gray)
+            case .overdue: return (TransactionStatus.overdue.label(language: store.lang), .red)
             }
         }()
         return HStack(spacing: 4) {
@@ -322,17 +328,17 @@ public struct TransactionListView: View {
 
     private func shortDate(_ d: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: store.lang.localeIdentifier)
         f.dateFormat = "dd/MM"
         return f.string(from: d)
     }
 
     private func amountString(_ v: Decimal) -> String {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "pt_BR")
-        f.numberStyle = .currency
-        f.currencyCode = "BRL"
-        return f.string(from: v as NSDecimalNumber) ?? "R$ 0,00"
+        Currency.format(
+            v,
+            currencyCode: store.settings.currency.currencyCode,
+            localeIdentifier: store.settings.currency.localeIdentifier
+        )
     }
 }
 
@@ -384,84 +390,97 @@ public struct TransactionFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                    Section("Tipo de conta") {
-                        Picker("Tipo", selection: $type) {
-                            Label("A pagar", systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
-                            Label("A receber", systemImage: "arrow.down.circle.fill").tag(TransactionType.receivable)
+                    Section(store.t(.txAccountType)) {
+                        Picker(store.t(.typeLabel), selection: $type) {
+                            Label(TransactionType.payable.label(language: store.lang), systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
+                            Label(TransactionType.receivable.label(language: store.lang), systemImage: "arrow.down.circle.fill").tag(TransactionType.receivable)
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: type) { categoryID = nil }
                     }
-                    Section("Valor") {
+                    Section(store.t(.txValueSection)) {
                         ProminentCurrencyField(
                             value: $amount,
                             tint: type == .payable ? .red.opacity(0.9) : .green,
-                            showKeyboardToolbar: false
+                            showKeyboardToolbar: false,
+                            currencyCode: store.settings.currency.currencyCode,
+                            localeIdentifier: store.settings.currency.localeIdentifier
                         )
                     }
-                    Section("Dados") {
-                        TextField("Descrição", text: $description)
+                    Section(store.t(.dataSection)) {
+                        TextField(store.t(.descriptionField), text: $description)
                             .focused($focusedField, equals: .description)
                             .submitLabel(.next)
                             .onSubmit { focusedField = .notes }
-                        Picker("Categoria", selection: $categoryID) {
-                            Text("Sem categoria").tag(nil as String?)
+                        Picker(store.t(.categoryLabel), selection: $categoryID) {
+                            Text(store.t(.noCategory)).tag(nil as String?)
                             ForEach(store.categories.filter { $0.type == (type == .payable ? .expense : .income) }) { cat in
                                 Text(cat.name).tag(cat.id as String?)
                             }
                         }
                     }
-                    Section("Vencimento e status") {
-                        FormDateField("Vencimento", date: $dueDate)
-                        Picker("Status", selection: $status) {
-                            Text("Pendente").tag(TransactionStatus.pending)
-                            Text("Pago").tag(TransactionStatus.paid)
+                    Section(store.t(.txDueAndStatus)) {
+                        FormDateField(
+                            store.t(.txDueDate), date: $dueDate,
+                            localeIdentifier: store.lang.localeIdentifier,
+                            okTitle: store.t(.ok)
+                        )
+                        Picker(store.t(.statusLabel), selection: $status) {
+                            Text(TransactionStatus.pending.label(language: store.lang)).tag(TransactionStatus.pending)
+                            Text(TransactionStatus.paid.label(language: store.lang)).tag(TransactionStatus.paid)
                         }
-                        TextField("Observações", text: $notes)
+                        TextField(store.t(.notesField), text: $notes)
                             .focused($focusedField, equals: .notes)
                             .submitLabel(.done)
                             .onSubmit { focusedField = nil }
                         if editingIsSeries {
-                            Text("Se o alcance incluir outras parcelas, cada uma mantém seu vencimento.")
+                            Text(store.t(.txSeriesFootnote))
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
                     if editing == nil {
-                        Section("Recorrência") {
-                            Picker("Tipo", selection: $recurrence) {
-                                Text("Única").tag(RecurrenceType.unique)
-                                Text("Parcelada").tag(RecurrenceType.installment)
-                                Text("Fixa").tag(RecurrenceType.fixed)
-                                Text("Recorrente").tag(RecurrenceType.recurring)
+                        Section(store.t(.txRecurrence)) {
+                            Picker(store.t(.typeLabel), selection: $recurrence) {
+                                Text(RecurrenceType.unique.label(language: store.lang)).tag(RecurrenceType.unique)
+                                Text(RecurrenceType.installment.label(language: store.lang)).tag(RecurrenceType.installment)
+                                Text(RecurrenceType.fixed.label(language: store.lang)).tag(RecurrenceType.fixed)
+                                Text(RecurrenceType.recurring.label(language: store.lang)).tag(RecurrenceType.recurring)
                             }
                             if recurrence == .installment {
-                                Stepper("Parcelas: \(installmentCount)", value: $installmentCount, in: 2 ... 48)
-                                Picker("Intervalo", selection: $interval) {
-                                    Text("Semanal").tag(InstallmentInterval.weekly)
-                                    Text("Quinzenal").tag(InstallmentInterval.biweekly)
-                                    Text("Mensal").tag(InstallmentInterval.monthly)
-                                    Text("Anual").tag(InstallmentInterval.yearly)
+                                Stepper(
+                                    String(format: store.t(.txInstallments), installmentCount),
+                                    value: $installmentCount, in: 2 ... 48
+                                )
+                                Picker(store.t(.txInterval), selection: $interval) {
+                                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
+                                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
+                                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
+                                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
                                 }
                             }
                             if recurrence == .recurring {
-                                Picker("Intervalo", selection: $interval) {
-                                    Text("Semanal").tag(InstallmentInterval.weekly)
-                                    Text("Quinzenal").tag(InstallmentInterval.biweekly)
-                                    Text("Mensal").tag(InstallmentInterval.monthly)
-                                    Text("Anual").tag(InstallmentInterval.yearly)
+                                Picker(store.t(.txInterval), selection: $interval) {
+                                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
+                                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
+                                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
+                                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
                                 }
-                                Text("Gera os próximos 24 lançamentos.")
+                                Text(store.t(.txGenerates24))
                                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                             }
                             if recurrence == .fixed {
-                                Text("Gera 24 competências mensais.")
+                                Text(store.t(.txGenerates24Monthly))
                                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                             }
                         }
                     }
                     if editingIsSeries, let seriesTarget = editing {
-                        Section("Conta em série") {
-                            Text("Esta conta é \(seriesTarget.recurrence.label.lowercased()) e faz parte de uma série de \(store.seriesMembers(targetID: seriesTarget.id).count) lançamentos. Ao salvar, escolha o alcance da alteração.")
+                        Section(store.t(.txSeriesAccount)) {
+                            Text(String(
+                                format: store.t(.txSeriesMessage),
+                                seriesTarget.recurrence.label(language: store.lang).lowercased(),
+                                store.seriesMembers(targetID: seriesTarget.id).count
+                            ))
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
@@ -474,45 +493,49 @@ public struct TransactionFormView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? "Nova transação" : "Editar transação")
+            .navigationTitle(editing == nil ? store.t(.txNewTitle) : store.t(.txEditTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fechar") { dismiss() }
+                    Button(store.t(.close)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Salvar") { requestSave() }
+                    Button(store.t(.save)) { requestSave() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("OK") { dismissKeyboard() }
+                    Button(store.t(.ok)) { dismissKeyboard() }
                 }
                 #endif
             }
             .confirmationDialog(
-                "Editar conta em série",
+                store.t(.txEditSeriesTitle),
                 isPresented: $showingScopeConfirm,
                 presenting: editing
             ) { target in
-                Button("\(EditScope.thisOne.label) (1)") {
+                Button("\(EditScope.thisOne.label(language: store.lang)) (1)") {
                     performSave(scope: .thisOne)
                 }
-                Button("\(EditScope.future.label) (\(store.scopeCount(targetID: target.id, scope: .future)))") {
+                Button("\(EditScope.future.label(language: store.lang)) (\(store.scopeCount(targetID: target.id, scope: .future)))") {
                     performSave(scope: .future)
                 }
-                Button("\(EditScope.all.label) (\(store.scopeCount(targetID: target.id, scope: .all)))") {
+                Button("\(EditScope.all.label(language: store.lang)) (\(store.scopeCount(targetID: target.id, scope: .all)))") {
                     performSave(scope: .all)
                 }
-                Button("Cancelar", role: .cancel) {}
+                Button(store.t(.cancel), role: .cancel) {}
             } message: { target in
-                Text("“\(target.description)” é \(target.recurrence.label.lowercased()). Alterar somente esta, esta e as próximas ou todas? Vencimentos das demais são preservados.")
+                Text(String(
+                    format: store.t(.txEditSeriesMessage),
+                    target.description,
+                    target.recurrence.label(language: store.lang).lowercased()
+                ))
             }
         }
     }
@@ -524,12 +547,13 @@ public struct TransactionFormView: View {
 
     private func requestSave() {
         let amountDecimal = amount
-        errors = TransactionEngine.validate(description: description, amount: amountDecimal)
+        errors = TransactionEngine.validate(description: description, amount: amountDecimal, language: store.lang)
         if editing == nil {
             errors += TransactionEngine.validateSeries(
                 recurrence: recurrence,
                 count: recurrence == .installment ? installmentCount : nil,
-                interval: recurrence == .installment ? interval : nil
+                interval: recurrence == .installment ? interval : nil,
+                language: store.lang
             )
         }
         guard errors.isEmpty else { return }
@@ -543,7 +567,7 @@ public struct TransactionFormView: View {
 
     private func performSave(scope: EditScope) {
         let amountDecimal = amount
-        errors = TransactionEngine.validate(description: description, amount: amountDecimal)
+        errors = TransactionEngine.validate(description: description, amount: amountDecimal, language: store.lang)
         guard errors.isEmpty else { return }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         let notesValue = notes.isEmpty ? nil : notes
@@ -616,24 +640,35 @@ public struct SettleTransactionView: View {
                             Text(transaction.description)
                                 .font(.headline)
                                 .foregroundStyle(VercelTheme.textPrimary)
-                            Text("Vencimento \(fullDate(transaction.dueDate)) • \(transaction.type.label)")
+                            Text(String(
+                                format: store.t(.txDueLine),
+                                fullDate(transaction.dueDate),
+                                transaction.type.label(language: store.lang)
+                            ))
                                 .font(.caption)
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
-                    Section("Valor pago") {
+                    Section(store.t(.txPaidValue)) {
                         ProminentCurrencyField(
                             value: $amount,
-                            tint: transaction.type == .payable ? .red.opacity(0.9) : .green
+                            tint: transaction.type == .payable ? .red.opacity(0.9) : .green,
+                            okTitle: store.t(.ok),
+                            currencyCode: store.settings.currency.currencyCode,
+                            localeIdentifier: store.settings.currency.localeIdentifier
                         )
                         if amount != transaction.amount {
-                            Text("Valor original: \(store.maskedAmount(transaction.amount))")
+                            Text(String(format: store.t(.txOriginalValue), store.maskedAmount(transaction.amount)))
                                 .font(.footnote)
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
-                    Section("Data da baixa") {
-                        FormDateField("Pago em", date: $paidDate)
+                    Section(store.t(.txSettleDate)) {
+                        FormDateField(
+                            store.t(.txPaidOn), date: $paidDate,
+                            localeIdentifier: store.lang.localeIdentifier,
+                            okTitle: store.t(.ok)
+                        )
                     }
                     if !errors.isEmpty {
                         Section {
@@ -644,20 +679,20 @@ public struct SettleTransactionView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(VercelTheme.bg)
+                .background(VercelTheme.card)
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle("Dar baixa")
+            .navigationTitle(store.t(.txSettleTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { dismiss() }
+                    Button(store.t(.cancel)) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(transaction.type == .receivable ? "Receber" : "Pagar") { confirm() }
+                    Button(transaction.type == .receivable ? store.t(.txReceive) : store.t(.txPay)) { confirm() }
                         .bold()
                 }
             }
@@ -665,7 +700,7 @@ public struct SettleTransactionView: View {
     }
 
     private func confirm() {
-        errors = TransactionEngine.validateSettle(amount: amount)
+        errors = TransactionEngine.validateSettle(amount: amount, language: store.lang)
         guard errors.isEmpty else { return }
         store.settle(id: transaction.id, amount: amount, paidDate: paidDate)
         dismiss()
@@ -673,12 +708,16 @@ public struct SettleTransactionView: View {
 
     private func fullDate(_ d: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: store.lang.localeIdentifier)
         f.dateStyle = .short
         return f.string(from: d)
     }
 
     private func amountString(_ v: Decimal) -> String {
-        CurrencyField.format(v)
+        CurrencyField.format(
+            v,
+            currencyCode: store.settings.currency.currencyCode,
+            localeIdentifier: store.settings.currency.localeIdentifier
+        )
     }
 }

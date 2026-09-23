@@ -24,10 +24,14 @@ public struct DashboardView: View {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: FinSpacing.md) {
-                        ScreenHeader("Resumo") {
+                        ScreenHeader(L10n.t(.summary, store.settings.language)) {
+                            SettingsGearButton()
                             PrivacyEyeButton()
                         }
-                        MonthPicker(year: $year, month: $month)
+                        MonthPicker(
+                            year: $year, month: $month,
+                            localeIdentifier: store.lang.localeIdentifier
+                        )
                         heroCard
                         statGrid
                         fundsCard
@@ -67,7 +71,10 @@ public struct DashboardView: View {
 
     private var evolution: [MonthlyEvolution] {
         let base = Calendar.current.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
-        return MetricsService.evolution(store.transactions, months: 6, base: base)
+        return MetricsService.evolution(
+            store.transactions, months: 6, base: base,
+            localeIdentifier: store.lang.localeIdentifier
+        )
     }
 
     private var upcoming: [FinancialTransaction] {
@@ -78,7 +85,7 @@ public struct DashboardView: View {
 
     private var heroCard: some View {
         VStack(spacing: FinSpacing.sm) {
-            Text("Balanço do mês")
+            Text(store.t(.dashBalance))
                 .font(.caption.bold())
                 .foregroundStyle(VercelTheme.textSecondary)
                 .textCase(.uppercase)
@@ -87,8 +94,8 @@ public struct DashboardView: View {
                 .monospacedDigit()
                 .foregroundStyle(VercelTheme.textPrimary)
             HStack(spacing: FinSpacing.sm) {
-                heroFlow("Receitas", metrics.totalIncome, .green, icon: "arrow.down.left")
-                heroFlow("Despesas", metrics.totalExpense, .red, icon: "arrow.up.right")
+                heroFlow(store.t(.dashChartIncome), metrics.totalIncome, .green, icon: "arrow.down.left")
+                heroFlow(store.t(.dashChartExpense), metrics.totalExpense, .red, icon: "arrow.up.right")
             }
         }
         .frame(maxWidth: .infinity)
@@ -96,10 +103,7 @@ public struct DashboardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: FinRadius.lg, style: .continuous)
                 .stroke(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.22), Color.white.opacity(0.05)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ),
+                    VercelTheme.edgeHighlight,
                     lineWidth: 1
                 )
         )
@@ -127,9 +131,9 @@ public struct DashboardView: View {
 
     private var statGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FinSpacing.sm) {
-            miniStat("Poupança", custom: String(format: "%.0f%%", metrics.savingsRate))
-            miniStat("A receber", value: metrics.pendingReceivable, color: .green)
-            miniStat("Vencido", value: metrics.overdueAmount, color: metrics.overdueAmount > 0 ? .red : nil)
+            miniStat(store.t(.dashSavings), custom: String(format: "%.0f%%", metrics.savingsRate))
+            miniStat(store.t(.dashToReceive), value: metrics.pendingReceivable, color: .green)
+            miniStat(store.t(.dashOverdueStat), value: metrics.overdueAmount, color: metrics.overdueAmount > 0 ? .red : nil)
         }
     }
 
@@ -164,12 +168,12 @@ public struct DashboardView: View {
             HStack(spacing: FinSpacing.md) {
                 TintedIcon("chart.pie.fill", tint: .purple, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Fundos")
+                    Text(store.t(.funds))
                         .font(.subheadline.bold())
                         .foregroundStyle(VercelTheme.textPrimary)
                     Text(store.funds.isEmpty
-                        ? "Nenhum fundo criado"
-                        : "\(store.funds.count) fundo(s) · \(store.maskedAmount(fundsTotal))")
+                        ? store.t(.dashNoFunds)
+                        : String(format: store.t(.dashFundsSummary), store.funds.count, store.maskedAmount(fundsTotal)))
                         .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 }
                 Spacer()
@@ -194,7 +198,7 @@ public struct DashboardView: View {
         Button(action: onSelectBudgets) {
             VStack(alignment: .leading, spacing: FinSpacing.sm) {
                 HStack {
-                    Text("Orçamentos")
+                    Text(store.t(.budgets))
                         .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                     Spacer()
                     Text("\(budgetRows.count)")
@@ -207,7 +211,7 @@ public struct DashboardView: View {
                     budgetLine(row)
                 }
                 if budgetRows.count > 5 {
-                    Text("+\(budgetRows.count - 5) outros")
+                    Text(String(format: store.t(.dashOthers), budgetRows.count - 5))
                         .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                 }
             }
@@ -225,17 +229,17 @@ public struct DashboardView: View {
                 Circle()
                     .fill(VercelTheme.hex(cat?.color ?? "#64748b"))
                     .frame(width: 8, height: 8)
-                Text(cat?.name ?? "Categoria removida")
+                Text(cat?.name ?? store.t(.dashNoCategory))
                     .font(.subheadline)
                     .foregroundStyle(VercelTheme.textPrimary)
                     .lineLimit(1)
                 Spacer()
                 if row.isOver {
-                    Text("Estourou \(store.maskedAmount(row.used - row.limit.limitAmount))")
+                    Text(String(format: store.t(.dashOverBy), store.maskedAmount(row.used - row.limit.limitAmount)))
                         .font(.caption.bold()).monospacedDigit()
                         .foregroundStyle(.red)
                 } else {
-                    Text("Restam \(store.maskedAmount(row.remaining))")
+                    Text(String(format: store.t(.dashLeft), store.maskedAmount(row.remaining)))
                         .font(.caption.bold()).monospacedDigit()
                         .foregroundStyle(row.isWarning ? .orange : VercelTheme.textSecondary)
                 }
@@ -243,7 +247,7 @@ public struct DashboardView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(VercelTheme.track)
                         .frame(height: 6)
                     LinearGradient(
                         colors: [barColor.opacity(0.7), barColor],
@@ -254,7 +258,10 @@ public struct DashboardView: View {
                 }
             }
             .frame(height: 6)
-            Text("\(store.maskedAmount(row.used)) de \(store.maskedAmount(row.limit.limitAmount))")
+            Text(String(
+                format: store.t(.budOfTemplate),
+                store.maskedAmount(row.used), store.maskedAmount(row.limit.limitAmount)
+            ))
                 .font(.caption2)
                 .foregroundStyle(VercelTheme.textTertiary)
         }
@@ -264,15 +271,17 @@ public struct DashboardView: View {
     // MARK: - Evolução 6 meses
 
     private var evolutionCard: some View {
-        VStack(alignment: .leading, spacing: FinSpacing.sm) {
-            Text("Evolução · 6 meses")
+        let incomeLabel = store.t(.dashChartIncome)
+        let expenseLabel = store.t(.dashChartExpense)
+        return VStack(alignment: .leading, spacing: FinSpacing.sm) {
+            Text(store.t(.dashEvolution))
                 .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
             if evolution.allSatisfy({ ($0.income as NSDecimalNumber).doubleValue == 0 && ($0.expense as NSDecimalNumber).doubleValue == 0 }) {
                 VStack(spacing: FinSpacing.sm) {
                     Image(systemName: "chart.bar.fill")
                         .font(.title)
                         .foregroundStyle(VercelTheme.textTertiary)
-                    Text("Sem movimentações no período.")
+                    Text(store.t(.dashNoMovement))
                         .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 180)
@@ -282,20 +291,20 @@ public struct DashboardView: View {
                         x: .value("Mês", point.label),
                         y: .value("Valor", (point.income as NSDecimalNumber).doubleValue)
                     )
-                    .foregroundStyle(by: .value("Tipo", "Receitas"))
-                    .position(by: .value("Tipo", "Receitas"))
+                    .foregroundStyle(by: .value("Tipo", incomeLabel))
+                    .position(by: .value("Tipo", incomeLabel))
                     .cornerRadius(4)
                     BarMark(
                         x: .value("Mês", point.label),
                         y: .value("Valor", (point.expense as NSDecimalNumber).doubleValue)
                     )
-                    .foregroundStyle(by: .value("Tipo", "Despesas"))
-                    .position(by: .value("Tipo", "Despesas"))
+                    .foregroundStyle(by: .value("Tipo", expenseLabel))
+                    .position(by: .value("Tipo", expenseLabel))
                     .cornerRadius(4)
                 }
                 .chartForegroundStyleScale([
-                    "Receitas": Color.green.gradient,
-                    "Despesas": Color.red.gradient,
+                    incomeLabel: Color.green.gradient,
+                    expenseLabel: Color.red.gradient,
                 ])
                 .chartXAxis { AxisMarks { AxisValueLabel().foregroundStyle(VercelTheme.textTertiary).font(.caption2) } }
                 .chartYAxisHidden(store.valuesHidden)
@@ -311,10 +320,10 @@ public struct DashboardView: View {
 
     private var breakdownCard: some View {
         VStack(alignment: .leading, spacing: FinSpacing.sm) {
-            Text("Despesas por categoria")
+            Text(store.t(.dashBreakdown))
                 .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
             if breakdown.isEmpty {
-                Text("Nenhuma despesa no mês.")
+                Text(store.t(.dashNoExpenses))
                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
             } else {
                 HStack(spacing: FinSpacing.lg) {
@@ -328,12 +337,12 @@ public struct DashboardView: View {
                     }
                     .frame(width: 128, height: 128)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Total")
+                        Text(store.t(.dashTotal))
                             .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                         Text(store.maskedAmount(breakdownTotal))
                             .font(.headline).monospacedDigit()
                             .foregroundStyle(VercelTheme.textPrimary)
-                        Text("\(breakdown.count) categorias")
+                        Text(String(format: store.t(.dashCategoriesCount), breakdown.count))
                             .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                     }
                     Spacer()
@@ -376,7 +385,7 @@ public struct DashboardView: View {
     private var upcomingCard: some View {
         VStack(alignment: .leading, spacing: FinSpacing.sm) {
             HStack {
-                Text("Próximos 7 dias")
+                Text(store.t(.dashUpcoming7))
                     .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                 Spacer()
                 if metrics.pendingPayable > 0 {
@@ -386,7 +395,7 @@ public struct DashboardView: View {
                 }
             }
             if upcoming.isEmpty {
-                Text("Nada vencendo nos próximos 7 dias. 🎉")
+                Text(store.t(.dashNothingDue))
                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
             } else {
                 ForEach(upcoming.prefix(5)) { t in
@@ -400,7 +409,7 @@ public struct DashboardView: View {
                             Text(t.description)
                                 .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
                                 .lineLimit(1)
-                            Text(Format.shortDate(t.dueDate))
+                            Text(Format.shortDate(t.dueDate, localeIdentifier: store.lang.localeIdentifier))
                                 .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                         }
                         Spacer()

@@ -4,7 +4,7 @@
 
 ```bash
 swift build                  # compiles Core + UI (macOS SDK)
-swift run FinanzinCoreTests  # runs the 33 tests — NOT `swift test` (no testTarget, errors "no tests found")
+swift run FinanzinCoreTests  # runs the 43 tests — NOT `swift test` (no testTarget, errors "no tests found")
 swift run FinanzinDemo       # opens real UI with seed data (macOS)
 ```
 
@@ -12,6 +12,10 @@ Rebuild the double-clickable bundle after changes:
 ```bash
 swift build --target FinanzinDemo && cp .build/arm64-apple-macosx/debug/FinanzinDemo FinanzinDemo.app/Contents/MacOS/ && codesign --force -s - FinanzinDemo.app
 ```
+Demo icon (from `logo.png`, one-time setup — survives rebuilds): `Assets/FinanzinDemo.icns`
+copied to `FinanzinDemo.app/Contents/Resources/` with `CFBundleIconFile`/`CFBundleIconName`
+in its `Info.plist`. iOS icon: `FinanzinApp/Assets.xcassets/AppIcon.appiconset/Icon-1024.png`
+(1024², no alpha, generated from `logo.png`). Regenerate both from `logo.png` if the logo changes.
 
 iOS device run (machine WITH Xcode 16+ only): `xcodegen generate && open Finanzin.xcodeproj` — this dir only edits sources.
 
@@ -26,8 +30,10 @@ iOS device run (machine WITH Xcode 16+ only): `xcodegen generate && open Finanzi
 
 - Tests are an `executableTarget` with a hand-rolled `check()` (no XCTest — CLT lacks the module). Same pattern as InoovexaAdmin. Run the single binary; there is no single-test filter.
 - Never add `Sources/FinanzinDemo` to the iOS target (`project.yml`): duplicate `@main` breaks the build.
+- After adding new `.swift` files under `Sources/`, run `xcodegen generate` before building in Xcode (the `.xcodeproj` has an explicit file list; SPM doesn't need it). Custom `Info.plist` keys must be declared in `project.yml` `info.properties` — xcodegen rewrites the plist and drops undeclared keys (dropping `UILaunchScreen` makes the app open small/letterboxed on iPhone).
 - Never import SwiftData / `@Model` into `Sources/`: it doesn't resolve under CLT. Persist via `Store`; convert `Decimal↔Double` only at the SwiftData boundary per `XcodeOnly/`.
 - `Category` is named `FinanceCategory` — plain `Category` collides with ObjC `Category` in the SDK.
+- `VercelTheme` tokens are dynamic (light + dark via `UIColor`/`NSColor` providers) — never hardcode `.white`/`.black` in Views, use the tokens or the element stays dark in light mode. Same for `toolbarColorScheme` (read `@Environment(\.colorScheme)`).
 - `Store` privacy mode: `valuesHidden` (UserDefaults) + `maskedAmount()` — new money text must use `maskedAmount`/`AmountText(..., hidden:)`, never `Format.currency` directly.
 - UI rows: clean lists use `.finCleanRow()` + `.finCleanList()` (transparent + separator, e.g. Transações/Orçamento/Desejos); boxed cards use `.finRow()` + `.finList()`. Screens need `.finBackground()` + `.finHideNavBar()` (root) or `.finDetailChrome()` (detail) or the notch/tab bar flashes light.
 - Persistence differs: iPhone uses `Store.defaultFileURL()` (Application Support); macOS demo is memory-only, always fresh.

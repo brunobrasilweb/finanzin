@@ -51,9 +51,13 @@ public enum Dates {
     }
 
     public static func monthLabel(year: Int, month: Int) -> String {
+        monthLabel(year: year, month: month, localeIdentifier: "pt_BR")
+    }
+
+    public static func monthLabel(year: Int, month: Int, localeIdentifier: String) -> String {
         let date = startOfMonth(year: year, month: month)
         let f = DateFormatter()
-        f.locale = Locale(identifier: "pt_BR")
+        f.locale = Locale(identifier: localeIdentifier)
         f.dateFormat = "MMM/yy"
         return f.string(from: date)
     }

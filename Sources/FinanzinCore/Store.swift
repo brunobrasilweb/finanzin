@@ -22,9 +22,76 @@ public final class Store: ObservableObject {
         valuesHidden = hidden
     }
 
-    /// Texto de valor respeitando o modo privado ("••••••" quando oculto).
+    // MARK: - Configurações (Sprint 7)
+
+    /// Preferências do app (idioma/moeda/tema/notificações).
+    /// Persistidas em UserDefaults, fora do Snapshot JSON (como `valuesHidden`).
+    private static let settingsKey = "finAppSettings"
+
+    @Published public var settings: AppSettings = Store.loadSettings() {
+        didSet { Store.persistSettings(settings) }
+    }
+
+    private static func loadSettings() -> AppSettings {
+        guard let data = UserDefaults.standard.data(forKey: settingsKey),
+              let decoded = try? JSONDecoder().decode(AppSettings.self, from: data)
+        else { return .defaults }
+        return decoded
+    }
+
+    private static func persistSettings(_ settings: AppSettings) {
+        if let data = try? JSONEncoder().encode(settings) {
+            UserDefaults.standard.set(data, forKey: settingsKey)
+        }
+    }
+
+    /// Sobrescreve tudo (usado por "Restaurar padrões" e testes).
+    public func replaceSettings(_ settings: AppSettings) {
+        self.settings = settings
+    }
+
+    public func updateLanguage(_ language: AppLanguage) {
+        settings.language = language
+    }
+
+    public func updateCurrency(_ currency: AppCurrency) {
+        settings.currency = currency
+    }
+
+    public func updateTheme(_ theme: ThemeMode) {
+        settings.theme = theme
+    }
+
+    public func updateNotifications(_ prefs: NotificationPrefs) {
+        settings.notifications = prefs
+    }
+
+    public func resetSettings() {
+        settings = .defaults
+    }
+
+    // MARK: - Recomeço (Sprint 7: Configurações → Começar do zero)
+
+    /// Apaga TODOS os registros (transações, fundos, orçamentos, listas e
+    /// categorias) e restaura só as categorias padrão do app.
+    /// Preferências (`settings`, `valuesHidden`) são preservadas.
+    public func resetToDefaults() {
+        transactions = []
+        funds = []
+        budgets = []
+        wishlists = []
+        wishlistItems = []
+        categories = []
+        Seed.apply(to: self)
+    }
+
+    /// Texto de valor respeitando moeda configurada + modo privado.
     public func maskedAmount(_ value: Decimal) -> String {
-        valuesHidden ? "••••••" : Currency.format(value)
+        valuesHidden ? "••••••" : Currency.format(
+            value,
+            currencyCode: settings.currency.currencyCode,
+            localeIdentifier: settings.currency.localeIdentifier
+        )
     }
 
     private let fileURL: URL?

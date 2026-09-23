@@ -44,7 +44,7 @@ public struct RootTabView: View {
             }
             #if os(iOS)
             .toolbar(.hidden, for: .tabBar)
-            .padding(.bottom, 60)
+            .padding(.bottom, 48)
             #endif
             .hideSystemTabBar()
             #if os(iOS)
@@ -61,13 +61,14 @@ public struct RootTabView: View {
                     .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Adicionar")
+            .accessibilityLabel(store.t(.add))
             .padding(.bottom, 42)
             #endif
         }
-        .preferredColorScheme(.dark)
-        .tint(.white)
+        .preferredColorScheme(store.settings.theme.colorScheme)
+        .tint(.primary)
         .finTabChrome()
+        .environment(\.locale, store.settings.locale)
         .environmentObject(store)
         .sheet(isPresented: $showTxForm) {
             TransactionFormView(year: year, month: month)
@@ -81,6 +82,16 @@ public struct RootTabView: View {
             WishlistFormView()
                 .environmentObject(store)
         }
+        .onAppear { reschedule() }
+        .onChange(of: store.transactions) { reschedule() }
+        .onChange(of: store.settings) { reschedule() }
+    }
+
+    /// Reagenda as notificações locais a cada mudança relevante.
+    private func reschedule() {
+        #if canImport(UserNotifications)
+        NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+        #endif
     }
 
     /// Ação do + central: abre o cadastro da aba atual
@@ -94,60 +105,55 @@ public struct RootTabView: View {
     }
 
     #if os(iOS)
-    /// Dock colada na borda inferior (sem vão preto abaixo), ícones
-    /// rebaixados e botão + centralizado na metade do menu.
+    /// Dock mínima (42pt) colada sobre o home indicator, sem vão e sem
+    /// altura extra: a área do home indicator mostra o fundo da própria
+    /// tela (`finBackground` já desce até a borda física), na mesma cor.
     private var bottomDock: some View {
         ZStack(alignment: .top) {
             // Fundo com encaixe circular no centro: a borda desce em arco
-            // ao redor da bola do + (anel de ~7pt), e desce até a borda
-            // da tela (sem vão preto abaixo do menu).
-            VStack(spacing: 0) {
-                DockNotchShape()
-                    .fill(VercelTheme.bg)
-                    .frame(height: 54)
-                VercelTheme.bg
-                    .frame(height: 30)
-            }
-            .ignoresSafeArea(edges: .bottom)
+            // ao redor da bola do + (anel de ~5pt).
+            DockNotchShape()
+                .fill(VercelTheme.bg)
+                .frame(height: 42)
             DockNotchEdge()
                 .stroke(VercelTheme.border, lineWidth: 1)
-                .frame(height: 54)
+                .frame(height: 42)
 
-            // Ícones baixos, colados na tela (bloco de 40pt encostado
-            // no fundo da dock de 54pt).
+            // Ícones colados embaixo (bloco de 32pt com 6pt de topo
+            // na dock de 42pt).
             HStack(spacing: 0) {
                 dockTab(index: 0, icon: "chart.bar.fill")
                 dockTab(index: 1, icon: "arrow.left.arrow.right")
-                Spacer().frame(width: 96)
+                Spacer().frame(width: 88)
                 dockTab(index: 2, icon: "gauge.with.dots.needle.67percent")
                 dockTab(index: 3, icon: "heart.fill")
             }
-            .frame(height: 40)
-            .padding(.top, 12)
+            .frame(height: 32)
+            .padding(.top, 6)
 
-            // Centro na metade do menu: 30pt acima da borda e 30pt
-            // dentro da barra (botão de 60pt, offset = -30).
+            // Centro na metade do menu: 28pt acima da borda e 28pt
+            // dentro da barra (botão de 56pt, offset = -28).
             Button(action: fabTap) {
                 Image(systemName: "plus")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.black)
-                    .frame(width: 60, height: 60)
+                    .frame(width: 56, height: 56)
                     .background(Color.white)
                     .clipShape(Circle())
                     .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Adicionar")
-            .offset(y: -30)
+            .accessibilityLabel(store.t(.add))
+            .offset(y: -28)
         }
-        .frame(height: 54)
+        .frame(height: 42)
     }
 
     private func dockTab(index: Int, icon: String) -> some View {
         Button { selectedTab = index } label: {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(selectedTab == index ? Color.white : VercelTheme.textTertiary)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(selectedTab == index ? VercelTheme.textPrimary : VercelTheme.textTertiary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
@@ -157,12 +163,14 @@ public struct RootTabView: View {
 }
 
 private struct FinTabChrome: ViewModifier {
+    @Environment(\.colorScheme) var scheme
+
     func body(content: Content) -> some View {
         #if os(iOS)
             content
                 .toolbarBackground(VercelTheme.bg, for: .tabBar)
                 .toolbarBackground(.visible, for: .tabBar)
-                .toolbarColorScheme(.dark, for: .tabBar)
+                .toolbarColorScheme(scheme, for: .tabBar)
         #else
             content
         #endif
@@ -176,15 +184,15 @@ private extension View {
 #if os(iOS)
 // MARK: - Dock com encaixe circular (borda ao redor da bola do +)
 
-/// Encaixe circular de raio 37 ao redor do botão + (raio 30):
-/// forma um anel de ~7pt contornando a metade de baixo da bola,
+/// Encaixe circular de raio 33 ao redor do botão + (raio 28):
+/// forma um anel de ~5pt contornando a metade de baixo da bola,
 /// com ombros suaves que emendam no topo reto da dock.
 private enum DockNotch {
-    static let radius: CGFloat = 37
+    static let radius: CGFloat = 33
     /// Meio-ângulo onde o arco encontra o ombro (20° acima do equador).
     static let phi: CGFloat = .pi / 9
     /// Extensão horizontal do ombro além do raio.
-    static let shoulder: CGFloat = 14
+    static let shoulder: CGFloat = 12
 }
 
 /// Silhueta cheia da dock (preenchimento).
