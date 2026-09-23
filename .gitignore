@@ -1,0 +1,8 @@
+.build/
+DerivedData/
+*.o
+*.d
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+FinanzinDemo.app/
