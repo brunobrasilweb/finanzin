@@ -19,6 +19,10 @@
 //   @Model final class WishlistModel { id, name, color, icon... }
 //   @Model final class WishlistItemModel { id, wishlistID, name, estimatedPrice(Double),
 //       priority, categoryID, notes, purchased(Bool), purchasedDate... }
+//   @Model final class AttachmentModel { id, transactionID(indexado),
+//       fileName, storedFileName, mimeType, size(Int), createdAt...
+//       (bytes em arquivo em Application Support/FinanzinAttachments,
+//       nunca binário no banco; excluir em cascata com a transação) }
 //
 // Regras:
 // - IDs seguem UUID string (compatível com admin/Inofinancy).

@@ -10,6 +10,8 @@ public final class Store: ObservableObject {
     @Published public var budgets: [BudgetLimit] = []
     @Published public var wishlists: [Wishlist] = []
     @Published public var wishlistItems: [WishlistItem] = []
+    /// Metadados dos comprovantes (bytes em `attachmentsDir`, fora do JSON).
+    @Published public var attachments: [TransactionAttachment] = []
 
     /// Preferência de privacidade (olho no topo): esconde valores monetários.
     /// Persistida em UserDefaults, fora do Snapshot JSON.
@@ -82,6 +84,13 @@ public final class Store: ObservableObject {
         wishlists = []
         wishlistItems = []
         categories = []
+        attachments = []
+        // Remove os arquivos dos comprovantes (metadados já zerados acima).
+        if let urls = try? FileManager.default.contentsOfDirectory(
+            at: attachmentsDir, includingPropertiesForKeys: nil)
+        {
+            for url in urls { try? FileManager.default.removeItem(at: url) }
+        }
         Seed.apply(to: self)
     }
 
@@ -96,8 +105,27 @@ public final class Store: ObservableObject {
 
     private let fileURL: URL?
 
-    public init(persistTo fileURL: URL? = nil, seedIfEmpty: Bool = true) {
+    /// Pasta onde os bytes dos comprovantes são gravados.
+    /// Demo/testes sem `fileURL` usam diretório temporário (sessão).
+    public let attachmentsDir: URL
+
+    public init(
+        persistTo fileURL: URL? = nil,
+        seedIfEmpty: Bool = true,
+        attachmentsDirectory: URL? = nil
+    ) {
         self.fileURL = fileURL
+        if let dir = attachmentsDirectory {
+            self.attachmentsDir = dir
+        } else if let url = fileURL {
+            self.attachmentsDir = url.deletingLastPathComponent()
+                .appendingPathComponent("FinanzinAttachments", isDirectory: true)
+        } else {
+            self.attachmentsDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("FinanzinAttachments", isDirectory: true)
+        }
+        try? FileManager.default.createDirectory(
+            at: attachmentsDir, withIntermediateDirectories: true)
         if let url = fileURL { load(from: url) }
         if categories.isEmpty, seedIfEmpty { Seed.apply(to: self) }
     }
@@ -199,6 +227,13 @@ public final class Store: ObservableObject {
             doomed.insert(t.id)
         }
         transactions.removeAll { doomed.contains($0.id) }
+        // Cascata: comprovantes das removidas (metadados + arquivos).
+        let doomedAttachments = attachments.filter { doomed.contains($0.transactionID) }
+        attachments.removeAll { doomed.contains($0.transactionID) }
+        for att in doomedAttachments {
+            try? FileManager.default.removeItem(
+                at: attachmentsDir.appendingPathComponent(att.storedFileName))
+        }
         save()
     }
 
@@ -522,6 +557,66 @@ public final class Store: ObservableObject {
         return items[0]
     }
 
+    // MARK: - Comprovantes (anexos por parcela)
+
+    /// Comprovantes de UMA parcela, ordenados por data de anexo.
+    public func attachments(for transactionID: String) -> [TransactionAttachment] {
+        attachments.filter { $0.transactionID == transactionID }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    public func attachmentCount(for transactionID: String) -> Int {
+        attachments.reduce(0) { $0 + ($1.transactionID == transactionID ? 1 : 0) }
+    }
+
+    /// URL do arquivo em disco (para preview/compartilhar), se existir.
+    public func attachmentFileURL(_ attachment: TransactionAttachment) -> URL? {
+        let url = attachmentsDir.appendingPathComponent(attachment.storedFileName)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Anexa bytes (imagem/PDF) a uma transação existente.
+    @discardableResult
+    public func addAttachment(
+        to transactionID: String, fileName: String, data: Data
+    ) throws -> TransactionAttachment {
+        guard transactions.contains(where: { $0.id == transactionID }) else {
+            throw AttachmentError.transactionNotFound
+        }
+        guard AttachmentValidator.isSupported(fileName: fileName) else {
+            throw AttachmentError.unsupportedType
+        }
+        guard !data.isEmpty else { throw AttachmentError.emptyData }
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        let attachment = TransactionAttachment(
+            transactionID: transactionID,
+            fileName: AttachmentValidator.displayName(
+                for: fileName, fallback: "comprovante.\(ext)"),
+            storedFileName: "\(UUID().uuidString).\(ext)",
+            mimeType: AttachmentValidator.mimeType(for: fileName),
+            size: data.count
+        )
+        do {
+            try data.write(
+                to: attachmentsDir.appendingPathComponent(attachment.storedFileName),
+                options: .atomic)
+        } catch {
+            throw AttachmentError.writeFailed(error.localizedDescription)
+        }
+        attachments.append(attachment)
+        save()
+        return attachment
+    }
+
+    /// Remove um comprovante (metadado + arquivo).
+    public func removeAttachment(id: String) {
+        guard let att = attachments.first(where: { $0.id == id }) else { return }
+        attachments.removeAll { $0.id == id }
+        try? FileManager.default.removeItem(
+            at: attachmentsDir.appendingPathComponent(att.storedFileName))
+        save()
+    }
+
     // MARK: - Persistência JSON
 
     private struct Snapshot: Codable {
@@ -531,13 +626,47 @@ public final class Store: ObservableObject {
         var budgets: [BudgetLimit]
         var wishlists: [Wishlist]
         var wishlistItems: [WishlistItem]
+        var attachments: [TransactionAttachment]
+
+        // Compat: JSON antigo não tem a chave `attachments`.
+        private enum Keys: String, CodingKey {
+            case categories, transactions, funds, budgets
+            case wishlists, wishlistItems, attachments
+        }
+
+        init(
+            categories: [FinanceCategory], transactions: [FinancialTransaction],
+            funds: [Fund], budgets: [BudgetLimit], wishlists: [Wishlist],
+            wishlistItems: [WishlistItem], attachments: [TransactionAttachment]
+        ) {
+            self.categories = categories
+            self.transactions = transactions
+            self.funds = funds
+            self.budgets = budgets
+            self.wishlists = wishlists
+            self.wishlistItems = wishlistItems
+            self.attachments = attachments
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            categories = try c.decode([FinanceCategory].self, forKey: .categories)
+            transactions = try c.decode([FinancialTransaction].self, forKey: .transactions)
+            funds = try c.decode([Fund].self, forKey: .funds)
+            budgets = try c.decode([BudgetLimit].self, forKey: .budgets)
+            wishlists = try c.decode([Wishlist].self, forKey: .wishlists)
+            wishlistItems = try c.decode([WishlistItem].self, forKey: .wishlistItems)
+            attachments = try c.decodeIfPresent(
+                [TransactionAttachment].self, forKey: .attachments) ?? []
+        }
     }
 
     public func save() {
         guard let url = fileURL else { return }
         let snap = Snapshot(
             categories: categories, transactions: transactions, funds: funds,
-            budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems
+            budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
+            attachments: attachments
         )
         do {
             let data = try JSONEncoder().encode(snap)
@@ -557,6 +686,7 @@ public final class Store: ObservableObject {
             budgets = snap.budgets
             wishlists = snap.wishlists
             wishlistItems = snap.wishlistItems
+            attachments = snap.attachments
         } catch {
             // Arquivo ausente na primeira execução: começa vazio e faz seed.
         }

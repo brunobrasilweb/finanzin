@@ -621,6 +621,153 @@ func testNotificationPlannerKinds() {    let cal = Calendar.current
     check(!plans.contains { $0.body.contains("Vencida") && $0.kind != .overdueDaily }, "vencida só no resumo")
 }
 
+func testDraftParsesFullURL() {
+    let url = URL(string: "finanzin://nova-transacao?valor=12,90&descricao=Padaria&data=2026-09-23")!
+    guard let draft = TransactionDraft.from(url: url) else {
+        check(false, "deep link válido gera draft"); return
+    }
+    eq(draft.amount ?? 0, 12.90, "valor com vírgula")
+    check(draft.description == "Padaria", "descrição preservada")
+    let cal = Calendar.current
+    check(cal.component(.year, from: draft.date ?? Date()) == 2026, "ano do draft")
+    check(cal.component(.month, from: draft.date ?? Date()) == 9, "mês do draft")
+    check(cal.component(.day, from: draft.date ?? Date()) == 23, "dia do draft")
+}
+
+func testDraftParsesThousandsAndENHost() {
+    let url = URL(string: "finanzin://new-transaction?value=1.234,56")!
+    guard let draft = TransactionDraft.from(url: url) else {
+        check(false, "host EN gera draft"); return
+    }
+    eq(draft.amount ?? 0, 1234.56, "milhar pt-BR (obtido \(draft.amount ?? 0))")
+    check(draft.description == nil, "sem descrição → nil")
+}
+
+func testDraftRejectsOtherHost() {
+    check(TransactionDraft.from(url: URL(string: "finanzin://outra-coisa?valor=10")!) == nil, "host estranho → nil")
+    let empty = TransactionDraft.from(url: URL(string: "finanzin://nova-transacao")!)
+    check(empty != nil, "sem query ainda abre o form")
+    check(empty?.amount == nil && empty?.description == nil, "sem query → campos nil")
+}
+
+func testDraftRoundTrip() {
+    let date = D(2026, 9, 23)
+    guard let url = TransactionDraft.url(amount: Decimal(string: "42.5") ?? 0, description: "Uber", date: date),
+          let back = TransactionDraft.from(url: url) else {
+        check(false, "round-trip gera URL parseável"); return
+    }
+    eq(back.amount ?? 0, 42.5, "valor sobrevive ao round-trip")
+    check(back.description == "Uber", "descrição sobrevive ao round-trip")
+    let cal = Calendar.current
+    check(cal.component(.day, from: back.date ?? Date()) == 23, "data sobrevive ao round-trip")
+}
+
+func testDraftParsesBRDate() {
+    let url = URL(string: "finanzin://nova-transacao?data=23/09/2026")!
+    let day = Calendar.current.component(.day, from: TransactionDraft.from(url: url)?.date ?? Date())
+    check(day == 23, "data dd/MM/yyyy aceita")
+}
+
+// MARK: - Comprovantes (anexos)
+
+func testAttachmentsDir() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("FinanzinTest-\(UUID().uuidString)", isDirectory: true)
+}
+
+func testAttachmentAcceptsImageAndPDF() {
+    let store = Store(seedIfEmpty: false, attachmentsDirectory: testAttachmentsDir())
+    let items = store.create(.init(
+        description: "Mercado", type: .payable, amount: 100, dueDate: D(2026, 10, 3)))
+    let id = items[0].id
+    let img = try! store.addAttachment(to: id, fileName: "nota.jpg", data: Data([0xFF, 0xD8, 0x01]))
+    check(img.mimeType == "image/jpeg", "jpg mapeia image/jpeg")
+    let pdf = try! store.addAttachment(to: id, fileName: "boleto.PDF", data: Data([0x25, 0x50, 0x44]))
+    check(pdf.isPDF, "PDF detectado (ext maiúscula)")
+    check(store.attachmentCount(for: id) == 2, "2 anexos na parcela")
+    check(store.attachmentFileURL(img) != nil, "arquivo da imagem existe em disco")
+    do {
+        try store.addAttachment(to: id, fileName: "planilha.zip", data: Data([0x01]))
+        check(false, "zip deveria lançar")
+    } catch AttachmentError.unsupportedType {
+        check(true, "zip lança unsupportedType")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    do {
+        try store.addAttachment(to: "inexistente", fileName: "x.jpg", data: Data([0x01]))
+        check(false, "transação inexistente deveria lançar")
+    } catch AttachmentError.transactionNotFound {
+        check(true, "lança transactionNotFound")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+}
+
+func testAttachmentDeleteRemovesFile() {
+    let dir = testAttachmentsDir()
+    let store = Store(seedIfEmpty: false, attachmentsDirectory: dir)
+    let items = store.create(.init(
+        description: "Conta", type: .payable, amount: 50, dueDate: D(2026, 10, 3)))
+    let att = try! store.addAttachment(to: items[0].id, fileName: "n.jpg", data: Data([0x01, 0x02]))
+    let path = dir.appendingPathComponent(att.storedFileName).path
+    check(FileManager.default.fileExists(atPath: path), "arquivo gravado")
+    store.removeAttachment(id: att.id)
+    check(store.attachments.isEmpty, "metadado removido")
+    check(!FileManager.default.fileExists(atPath: path), "arquivo removido do disco")
+    // Excluir a transação limpa os anexos restantes em cascata.
+    let att2 = try! store.addAttachment(to: items[0].id, fileName: "m.png", data: Data([0x03]))
+    let path2 = dir.appendingPathComponent(att2.storedFileName).path
+    store.deleteTransactions(ids: [items[0].id])
+    check(store.attachments.isEmpty, "cascata limpa metadados")
+    check(!FileManager.default.fileExists(atPath: path2), "cascata apaga arquivo")
+}
+
+func testAttachmentSnapshotRoundTrip() {
+    let dir = testAttachmentsDir()
+    let json = dir.appendingPathComponent("finanzin.json")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let store = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    let items = store.create(.init(
+        description: "Aluguel", type: .payable, amount: 1500, dueDate: D(2026, 10, 5)))
+    _ = try! store.addAttachment(to: items[0].id, fileName: "recibo.jpg", data: Data([0x09, 0x08]))
+    let reopened = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    check(reopened.attachments.count == 1, "metadado sobrevive ao JSON")
+    check(reopened.attachments[0].transactionID == items[0].id, "vínculo preservado")
+    check(reopened.attachmentFileURL(reopened.attachments[0]) != nil, "arquivo resolvido após reload")
+}
+
+func testAttachmentSnapshotCompatOldJSON() {
+    // JSON antigo (sem chave `attachments`) abre sem anexos.
+    let raw = """
+    {"categories":[],"transactions":[],"funds":[],"budgets":[],"wishlists":[],"wishlistItems":[]}
+    """
+    let decoded = try! JSONDecoder().decode(
+        [String: [String]].self, from: Data(raw.utf8))
+    check(decoded["attachments"] == nil, "json antigo não tem anexos")
+    let store = Store(seedIfEmpty: false, attachmentsDirectory: testAttachmentsDir())
+    check(store.attachments.isEmpty, "store novo começa sem anexos")
+}
+
+func testSeriesEditKeepsAttachmentsPerParcel() {
+    let store = Store(seedIfEmpty: false, attachmentsDirectory: testAttachmentsDir())
+    let items = store.create(.init(
+        description: "Curso", type: .payable, amount: 900,
+        recurrence: .installment, dueDate: D(2026, 10, 1),
+        totalInstallments: 3, interval: .monthly
+    ))
+    let child2 = items.first { $0.currentInstallment == 2 }!
+    _ = try! store.addAttachment(to: child2.id, fileName: "comp2.jpg", data: Data([0x07]))
+    store.applySeriesEdit(targetID: child2.id, scope: .future, edit: .init(
+        description: "Curso novo", categoryID: nil, amount: 100, notes: nil
+    ))
+    check(store.attachmentCount(for: child2.id) == 1, "anexo fica na parcela 2")
+    let child3 = store.transactions.first { $0.currentInstallment == 3 }!
+    check(store.attachmentCount(for: child3.id) == 0, "parcela 3 não herda anexo")
+    let head = store.transactions.first { $0.currentInstallment == 1 }!
+    check(store.attachmentCount(for: head.id) == 0, "cabeça intacta sem anexo")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -668,6 +815,16 @@ struct TestRunner {
             ("testValidateEnglish", testValidateEnglish),
             ("testEvolutionLocale", testEvolutionLocale),
             ("testResetToDefaults", testResetToDefaults),
+            ("testDraftParsesFullURL", testDraftParsesFullURL),
+            ("testDraftParsesThousandsAndENHost", testDraftParsesThousandsAndENHost),
+            ("testDraftRejectsOtherHost", testDraftRejectsOtherHost),
+            ("testDraftRoundTrip", testDraftRoundTrip),
+            ("testDraftParsesBRDate", testDraftParsesBRDate),
+            ("testAttachmentAcceptsImageAndPDF", testAttachmentAcceptsImageAndPDF),
+            ("testAttachmentDeleteRemovesFile", testAttachmentDeleteRemovesFile),
+            ("testAttachmentSnapshotRoundTrip", testAttachmentSnapshotRoundTrip),
+            ("testAttachmentSnapshotCompatOldJSON", testAttachmentSnapshotCompatOldJSON),
+            ("testSeriesEditKeepsAttachmentsPerParcel", testSeriesEditKeepsAttachmentsPerParcel),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

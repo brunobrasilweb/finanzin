@@ -41,6 +41,7 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: FinanzinApp/FinanzinApp.swift
+      - path: FinanzinApp/RegistrarGastoIntent.swift
       - path: FinanzinApp/Assets.xcassets
         buildPhase: resources
     dependencies:
@@ -53,6 +54,11 @@ targets:
       # o UILaunchScreen sumiu e o app voltou a abrir pequeno no iPhone).
       properties:
         UILaunchScreen: {}
+        NSCameraUsageDescription: "Tirar foto do comprovante para anexar à transação."
+        NSPhotoLibraryUsageDescription: "Escolher foto do comprovante para anexar à transação."
+        CFBundleURLTypes:
+          - CFBundleURLName: br.inoovexa.finanzin
+            CFBundleURLSchemes: [finanzin]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.inoovexa.finanzin

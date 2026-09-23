@@ -1,5 +1,9 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import FinanzinCore
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Lista mensal com filtros + baixa
 
@@ -277,10 +281,21 @@ public struct TransactionListView: View {
                     .font(.subheadline)
                     .foregroundStyle(VercelTheme.textPrimary)
                     .lineLimit(1)
-                Text(metaLine(t))
-                    .font(.caption)
-                    .foregroundStyle(VercelTheme.textTertiary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(metaLine(t))
+                        .font(.caption)
+                        .foregroundStyle(VercelTheme.textTertiary)
+                        .lineLimit(1)
+                    let attachCount = store.attachmentCount(for: t.id)
+                    if attachCount > 0 {
+                        Image(systemName: "paperclip")
+                            .font(.caption2.bold())
+                            .foregroundStyle(VercelTheme.textTertiary)
+                        Text("\(attachCount)")
+                            .font(.caption2.bold())
+                            .foregroundStyle(VercelTheme.textTertiary)
+                    }
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
@@ -363,24 +378,38 @@ public struct TransactionFormView: View {
     @State private var installmentCount: Int
     @State private var interval: InstallmentInterval
     @State private var showingScopeConfirm = false
+    @State private var isQuickAdd = false
     @State private var errors: [String] = []
+    // Comprovantes: edição grava direto no Store; criação acumula em
+    // `pending` e anexa na primeira parcela após o `create()`.
+    @State private var pending: [PendingAttachment] = []
+    @State private var showingFileImporter = false
+    @State private var showingCamera = false
+    @State private var showingLibrary = false
+    @State private var previewURLs: [URL] = []
+    @State private var previewIndex: Int = 0
+    @State private var showingPreview = false
+    @State private var attachmentError: String?
     private enum Field { case description, notes }
     @FocusState private var focusedField: Field?
 
-    public init(editing: FinancialTransaction? = nil, year: Int, month: Int) {
+    public init(editing: FinancialTransaction? = nil, year: Int, month: Int, draft: TransactionDraft? = nil) {
         self.editing = editing
         self.year = year
         self.month = month
-        _description = State(initialValue: editing?.description ?? "")
+        // Cadastro rápido (deep link/Siri): pré-preenche valor/descrição/data
+        // como conta a pagar única quitada; categoria o usuário escolhe.
+        _description = State(initialValue: editing?.description ?? draft?.description ?? "")
         _type = State(initialValue: editing?.type ?? .payable)
-        _amount = State(initialValue: editing?.amount ?? 0)
+        _amount = State(initialValue: editing?.amount ?? draft?.amount ?? 0)
         _categoryID = State(initialValue: editing?.categoryID)
-        _dueDate = State(initialValue: editing?.dueDate ?? Date())
-        _status = State(initialValue: editing?.status == .paid ? .paid : .pending)
+        _dueDate = State(initialValue: editing?.dueDate ?? draft?.date ?? Date())
+        _status = State(initialValue: editing?.status == .paid ? .paid : (draft != nil ? .paid : .pending))
         _notes = State(initialValue: editing?.notes ?? "")
         _recurrence = State(initialValue: editing?.recurrence ?? .unique)
         _installmentCount = State(initialValue: max(editing?.installmentCount ?? 2, 2))
         _interval = State(initialValue: editing?.installmentInterval ?? .monthly)
+        _isQuickAdd = State(initialValue: editing == nil && draft != nil)
     }
 
     private var editingIsSeries: Bool {
@@ -390,6 +419,12 @@ public struct TransactionFormView: View {
     public var body: some View {
         NavigationStack {
             Form {
+                    if isQuickAdd {
+                        Section {
+                            Text(store.t(.quickAddHint))
+                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                        }
+                    }
                     Section(store.t(.txAccountType)) {
                         Picker(store.t(.typeLabel), selection: $type) {
                             Label(TransactionType.payable.label(language: store.lang), systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
@@ -436,6 +471,55 @@ public struct TransactionFormView: View {
                         if editingIsSeries {
                             Text(store.t(.txSeriesFootnote))
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                        }
+                    }
+                    Section(store.t(.txReceipts)) {
+                        if displayItems.isEmpty {
+                            Text(store.t(.txAttachEmpty))
+                                .font(.footnote)
+                                .foregroundStyle(VercelTheme.textSecondary)
+                        } else {
+                            ForEach(displayItems) { item in
+                                AttachmentRow(
+                                    item: item,
+                                    hidden: store.valuesHidden,
+                                    localeIdentifier: store.lang.localeIdentifier,
+                                    onPreview: { openPreview(item) },
+                                    onDelete: { deleteDisplayItem(item) }
+                                )
+                            }
+                        }
+                        #if os(iOS)
+                        Button {
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                showingCamera = true
+                            } else {
+                                showingLibrary = true
+                            }
+                        } label: {
+                            Label(store.t(.txTakePhoto), systemImage: "camera")
+                        }
+                        Button {
+                            showingLibrary = true
+                        } label: {
+                            Label(store.t(.txChoosePhoto), systemImage: "photo")
+                        }
+                        #endif
+                        Button {
+                            showingFileImporter = true
+                        } label: {
+                            Label(store.t(.txAttachFile), systemImage: "paperclip")
+                        }
+                        if editingIsSeries {
+                            Text(store.t(.txSeriesAttachNote))
+                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                        }
+                        if editing == nil, !pending.isEmpty {
+                            Text(store.t(.txSaveToAttach))
+                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                        }
+                        if let attachmentError {
+                            Text(attachmentError).foregroundStyle(.red)
                         }
                     }
                     if editing == nil {
@@ -497,7 +581,7 @@ public struct TransactionFormView: View {
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
-            .navigationTitle(editing == nil ? store.t(.txNewTitle) : store.t(.txEditTitle))
+            .navigationTitle(editing == nil ? (isQuickAdd ? store.t(.quickAddTitle) : store.t(.txNewTitle)) : store.t(.txEditTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -537,7 +621,158 @@ public struct TransactionFormView: View {
                     target.recurrence.label(language: store.lang).lowercased()
                 ))
             }
+            .fileImporter(
+                isPresented: $showingFileImporter,
+                allowedContentTypes: [.image, .pdf],
+                allowsMultipleSelection: true
+            ) { result in
+                switch result {
+                case .success(let urls): addPickedFiles(urls)
+                case .failure: attachmentError = store.t(.txAttachFailed)
+                }
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showingCamera) {
+                PhotoCaptureView(
+                    source: .camera,
+                    onPick: { addCapturedData($0, fileName: $1) },
+                    onCancel: { showingCamera = false }
+                )
+            }
+            .sheet(isPresented: $showingLibrary) {
+                PhotoCaptureView(
+                    source: .library,
+                    onPick: { addCapturedData($0, fileName: $1) },
+                    onCancel: { showingLibrary = false }
+                )
+            }
+            #endif
+            #if !os(iOS)
+            // iOS apresenta o QuickLook via UIKit (ver AttachmentPreviewPresenter).
+            .sheet(isPresented: $showingPreview) {
+                NavigationStack {
+                    AttachmentPreview(urls: previewURLs, index: previewIndex)
+                        .navigationTitle(store.t(.txReceipts))
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button(store.t(.close)) { showingPreview = false }
+                            }
+                        }
+                }
+            }
+            #endif
         }
+    }
+
+    // MARK: - Comprovantes
+
+    /// Linhas da seção: salvos do Store (edição) ou pendentes (criação).
+    private var displayItems: [AttachmentDisplay] {
+        if let edit = editing {
+            return store.attachments(for: edit.id).map { att in
+                AttachmentDisplay(
+                    id: att.id, fileName: att.fileName,
+                    sizeText: att.formattedSize, createdAt: att.createdAt,
+                    isPDF: att.isPDF,
+                    fileURL: store.attachmentFileURL(att)
+                )
+            }
+        }
+        return pending.map { p in
+            AttachmentDisplay(
+                id: p.id, fileName: p.fileName, sizeText: p.sizeText,
+                createdAt: Date(), isPDF: p.isPDF, imageData: p.data
+            )
+        }
+    }
+
+    private func addPickedFiles(_ urls: [URL]) {
+        attachmentError = nil
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else {
+                attachmentError = store.t(.txAttachFailed)
+                continue
+            }
+            addData(data, fileName: url.lastPathComponent)
+        }
+    }
+
+    private func addCapturedData(_ data: Data, fileName: String) {
+        attachmentError = nil
+        #if os(iOS)
+        showingCamera = false
+        showingLibrary = false
+        #endif
+        addData(data, fileName: fileName)
+    }
+
+    private func addData(_ data: Data, fileName: String) {
+        guard AttachmentValidator.isSupported(fileName: fileName) else {
+            attachmentError = store.t(.txAttachUnsupported)
+            return
+        }
+        guard !data.isEmpty else {
+            attachmentError = store.t(.txAttachFailed)
+            return
+        }
+        if let edit = editing {
+            do {
+                try store.addAttachment(to: edit.id, fileName: fileName, data: data)
+            } catch AttachmentError.unsupportedType {
+                attachmentError = store.t(.txAttachUnsupported)
+            } catch {
+                attachmentError = store.t(.txAttachFailed)
+            }
+        } else {
+            pending.append(PendingAttachment(fileName: AttachmentValidator.displayName(
+                for: fileName, fallback: "comprovante"), data: data))
+        }
+    }
+
+    private func deleteDisplayItem(_ item: AttachmentDisplay) {
+        if editing != nil {
+            store.removeAttachment(id: item.id)
+        } else {
+            pending.removeAll { $0.id == item.id }
+        }
+    }
+
+    /// Resolve a URL para o QuickLook (pendente é materializado no temp).
+    private func resolvePreviewURL(_ item: AttachmentDisplay) -> URL? {
+        if let url = item.fileURL { return url }
+        guard let p = pending.first(where: { $0.id == item.id }) else { return nil }
+        // Nome seguro para o temp (sem ":" do ISO8601, inválido em path).
+        let safe = p.fileName.replacingOccurrences(of: ":", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(p.id)-\(safe)")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? p.data.write(to: url, options: .atomic)
+        }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func openPreview(_ item: AttachmentDisplay) {
+        attachmentError = nil
+        var urls: [URL] = []
+        var index = 0
+        for d in displayItems {
+            guard let url = resolvePreviewURL(d) else { continue }
+            if d.id == item.id { index = urls.count }
+            urls.append(url)
+        }
+        guard !urls.isEmpty else {
+            attachmentError = store.t(.txAttachFailed)
+            return
+        }
+        #if os(iOS)
+        AttachmentPreviewPresenter.present(urls: urls, index: index)
+        #else
+        previewURLs = urls
+        previewIndex = index
+        showingPreview = true
+        #endif
     }
 
     private func dismissKeyboard() {
@@ -604,8 +839,16 @@ public struct TransactionFormView: View {
                 interval: recurrence == .installment || recurrence == .recurring ? interval : nil
             )
             let items = store.create(input)
-            if status == .paid, let first = items.first {
-                store.updateStatus(id: first.id, to: .paid)
+            // Pendentes (foto/arquivo escolhidos antes de salvar) vão para a
+            // primeira parcela; demais parcelas recebem os próprios depois.
+            if let first = items.first {
+                for p in pending {
+                    _ = try? store.addAttachment(
+                        to: first.id, fileName: p.fileName, data: p.data)
+                }
+                if status == .paid {
+                    store.updateStatus(id: first.id, to: .paid)
+                }
             }
         }
         dismiss()

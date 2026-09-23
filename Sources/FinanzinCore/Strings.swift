@@ -106,6 +106,16 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case txReceive
     case txPay
     case txDueLine
+    // Comprovantes (anexos)
+    case txReceipts
+    case txAttachFile
+    case txTakePhoto
+    case txChoosePhoto
+    case txAttachEmpty
+    case txAttachUnsupported
+    case txAttachFailed
+    case txSeriesAttachNote
+    case txSaveToAttach
     // Resumo
     case dashBalance
     case dashSavings
@@ -211,6 +221,11 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case wishEditItem
     case wishErrPrice
     case wishErrGenerate
+    // Cadastro rápido (deep link + Siri/Atalhos após pagar no NFC)
+    case quickAddTitle
+    case quickAddHint
+    case quickAddValueLabel
+    case quickAddDescLabel
 }
 
 public enum L10n {
@@ -326,6 +341,15 @@ public enum L10n {
         case .txReceive: "Receber"
         case .txPay: "Pagar"
         case .txDueLine: "Vencimento %@ • %@"
+        case .txReceipts: "Comprovantes"
+        case .txAttachFile: "Anexar arquivo"
+        case .txTakePhoto: "Tirar foto"
+        case .txChoosePhoto: "Escolher foto"
+        case .txAttachEmpty: "Nenhum comprovante anexado."
+        case .txAttachUnsupported: "Só imagens e PDF são aceitos."
+        case .txAttachFailed: "Não foi possível anexar o arquivo."
+        case .txSeriesAttachNote: "O comprovante vale só para esta parcela."
+        case .txSaveToAttach: "Os arquivos entram após salvar — já dá para tirar a foto e deixar pronta aqui."
         // Resumo
         case .dashBalance: "Balanço do mês"
         // 
@@ -438,6 +462,10 @@ public enum L10n {
         case .wishEditItem: "Editar desejo"
         case .wishErrPrice: "Preço deve ser maior que zero."
         case .wishErrGenerate: "Não foi possível gerar a conta."
+        case .quickAddTitle: "Registrar gasto"
+        case .quickAddHint: "Vindo do atalho — confira e salve."
+        case .quickAddValueLabel: "Valor"
+        case .quickAddDescLabel: "O quê?"
         }
     }
 
@@ -541,6 +569,15 @@ public enum L10n {
         case .txReceive: "Receive"
         case .txPay: "Pay"
         case .txDueLine: "Due %@ • %@"
+        case .txReceipts: "Receipts"
+        case .txAttachFile: "Attach file"
+        case .txTakePhoto: "Take photo"
+        case .txChoosePhoto: "Choose photo"
+        case .txAttachEmpty: "No receipts attached."
+        case .txAttachUnsupported: "Only images and PDF are supported."
+        case .txAttachFailed: "Could not attach the file."
+        case .txSeriesAttachNote: "The receipt applies to this installment only."
+        case .txSaveToAttach: "Files attach after saving — you can take the photo now and keep it ready here."
         case .dashBalance: "Month balance"
         case .dashSavings: "Savings"
         case .dashToReceive: "To receive"
@@ -643,6 +680,10 @@ public enum L10n {
         case .wishEditItem: "Edit wish"
         case .wishErrPrice: "Price must be greater than zero."
         case .wishErrGenerate: "Could not create the bill."
+        case .quickAddTitle: "Log expense"
+        case .quickAddHint: "From the shortcut — review and save."
+        case .quickAddValueLabel: "Amount"
+        case .quickAddDescLabel: "What?"
         }
     }
 }
