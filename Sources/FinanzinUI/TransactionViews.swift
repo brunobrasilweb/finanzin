@@ -10,6 +10,7 @@ public struct TransactionListView: View {
 
     @State private var showingCategories = false
     @State private var editing: FinancialTransaction?
+    @State private var settling: FinancialTransaction?
     @State private var pendingDelete: FinancialTransaction?
     @State private var typeFilter: TransactionType?
     @State private var statusFilter: TransactionStatus?
@@ -78,7 +79,7 @@ public struct TransactionListView: View {
                                             Button("Reabrir") { store.updateStatus(id: t.id, to: .pending) }
                                                 .tint(.orange)
                                         } else {
-                                            Button("Dar baixa") { store.updateStatus(id: t.id, to: .paid) }
+                                            Button("Dar baixa") { settling = t }
                                                 .tint(.green)
                                         }
                                     }
@@ -95,6 +96,9 @@ public struct TransactionListView: View {
             }
             .sheet(item: $editing) { t in
                 TransactionFormView(editing: t, year: year, month: month)
+            }
+            .sheet(item: $settling) { t in
+                SettleTransactionView(transaction: t)
             }
             .confirmationDialog(
                 "Excluir conta",
@@ -466,5 +470,99 @@ public struct TransactionFormView: View {
             }
         }
         dismiss()
+    }
+}
+
+// MARK: - Dar baixa com valor e data
+
+public struct SettleTransactionView: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+
+    var transaction: FinancialTransaction
+
+    // Pré-preenchidos com os dados da transação (valor e vencimento),
+    // editáveis antes de confirmar a baixa.
+    @State private var amount: Decimal
+    @State private var paidDate: Date
+    @State private var errors: [String] = []
+
+    public init(transaction: FinancialTransaction) {
+        self.transaction = transaction
+        _amount = State(initialValue: transaction.amount)
+        _paidDate = State(initialValue: transaction.paidDate ?? transaction.dueDate)
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ZStack {
+                VercelTheme.bg.ignoresSafeArea()
+                Form {
+                    Section {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(transaction.description)
+                                .font(.headline)
+                                .foregroundStyle(VercelTheme.textPrimary)
+                            Text("Vencimento \(fullDate(transaction.dueDate)) • \(transaction.type.label)")
+                                .font(.caption)
+                                .foregroundStyle(VercelTheme.textSecondary)
+                        }
+                    }
+                    Section("Valor pago") {
+                        ProminentCurrencyField(
+                            value: $amount,
+                            tint: transaction.type == .payable ? .red.opacity(0.9) : .green
+                        )
+                        if amount != transaction.amount {
+                            Text("Valor original: \(amountString(transaction.amount))")
+                                .font(.footnote)
+                                .foregroundStyle(VercelTheme.textSecondary)
+                        }
+                    }
+                    Section("Data da baixa") {
+                        DatePicker("Pago em", selection: $paidDate, displayedComponents: .date)
+                    }
+                    if !errors.isEmpty {
+                        Section {
+                            ForEach(errors, id: \.self) { e in
+                                Text(e).foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Dar baixa")
+            #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(transaction.type == .receivable ? "Receber" : "Pagar") { confirm() }
+                        .bold()
+                }
+            }
+        }
+    }
+
+    private func confirm() {
+        errors = TransactionEngine.validateSettle(amount: amount)
+        guard errors.isEmpty else { return }
+        store.settle(id: transaction.id, amount: amount, paidDate: paidDate)
+        dismiss()
+    }
+
+    private func fullDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "pt_BR")
+        f.dateStyle = .short
+        return f.string(from: d)
+    }
+
+    private func amountString(_ v: Decimal) -> String {
+        CurrencyField.format(v)
     }
 }

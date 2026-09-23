@@ -219,4 +219,27 @@ public enum TransactionEngine {
         copy.paidDate = status == .paid ? Date() : nil
         return copy
     }
+
+    /// Baixa com valor e data informados (permite juros/desconto e data diferente
+    /// do vencimento). Retorna cópia com `status == .paid`.
+    public static func settling(_ t: FinancialTransaction, amount: Decimal, paidDate: Date) -> FinancialTransaction {
+        var copy = t
+        copy.status = .paid
+        copy.amount = amount
+        // Conta única: total acompanha o valor baixado; parcelada/fixa/recorrente
+        // preserva o total original da série.
+        if copy.recurrence == .unique {
+            copy.totalAmount = amount
+        }
+        copy.paidDate = paidDate
+        return copy
+    }
+
+    /// Validação da baixa: valor não negativo.
+    public static func validateSettle(amount: Decimal) -> [String] {
+        if (amount as NSDecimalNumber).doubleValue < 0 {
+            return ["Valor da baixa não pode ser negativo."]
+        }
+        return []
+    }
 }

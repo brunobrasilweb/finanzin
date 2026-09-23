@@ -101,6 +101,14 @@ public final class Store: ObservableObject {
         save()
     }
 
+    /// Dá baixa com valor e data específicos (pré-preenchidos na UI com o valor
+    /// e o vencimento da transação, editáveis antes de confirmar).
+    public func settle(id: String, amount: Decimal, paidDate: Date) {
+        guard let i = transactions.firstIndex(where: { $0.id == id }) else { return }
+        transactions[i] = TransactionEngine.settling(transactions[i], amount: amount, paidDate: paidDate)
+        save()
+    }
+
     public func deleteTransactions(ids: [String]) {
         var doomed = Set(ids)
         // Cascata: filhas de raízes removidas não podem ficar órfãs.
