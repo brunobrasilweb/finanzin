@@ -10,13 +10,15 @@ public struct DashboardView: View {
     @Binding var month: Int
     var onSelectCategory: (String?) -> Void
     var onSelectBudgets: () -> Void = {}
+    var onSelectInvoices: () -> Void = {}
     @State private var showFunds = false
 
-    public init(year: Binding<Int>, month: Binding<Int>, onSelectCategory: @escaping (String?) -> Void, onSelectBudgets: @escaping () -> Void = {}) {
+    public init(year: Binding<Int>, month: Binding<Int>, onSelectCategory: @escaping (String?) -> Void, onSelectBudgets: @escaping () -> Void = {}, onSelectInvoices: @escaping () -> Void = {}) {
         _year = year
         _month = month
         self.onSelectCategory = onSelectCategory
         self.onSelectBudgets = onSelectBudgets
+        self.onSelectInvoices = onSelectInvoices
     }
 
     public var body: some View {
@@ -35,6 +37,9 @@ public struct DashboardView: View {
                         heroCard
                         statGrid
                         fundsCard
+                        if !store.creditCards.isEmpty {
+                            invoicesCard
+                        }
                         if !budgetRows.isEmpty {
                             budgetsCard
                         }
@@ -180,6 +185,82 @@ public struct DashboardView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
                     .foregroundStyle(VercelTheme.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .finCard()
+    }
+
+    // MARK: - Faturas dos cartões (atalho para Transações)
+
+    private struct InvoiceSummary {
+        var card: CreditCard
+        var total: Decimal
+        var paid: Bool
+    }
+
+    /// Um resumo por cartão com lançamentos no mês + total geral.
+    private var invoiceSummaries: [InvoiceSummary] {
+        store.creditCards
+            .sorted { $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending }
+            .compactMap { card in
+                let items = store.invoiceTransactions(cardID: card.id, year: year, month: month)
+                guard !items.isEmpty else { return nil }
+                return InvoiceSummary(
+                    card: card,
+                    total: InvoiceService.total(items),
+                    paid: InvoiceService.isPaid(items)
+                )
+            }
+    }
+
+    private var invoicesTotal: Decimal {
+        invoiceSummaries.reduce(Decimal(0)) { $0 + $1.total }
+    }
+
+    private var invoicesCard: some View {
+        Button(action: onSelectInvoices) {
+            VStack(alignment: .leading, spacing: FinSpacing.sm) {
+                HStack {
+                    Image(systemName: "creditcard.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.blue)
+                    Text(store.t(.dashInvoices))
+                        .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
+                    Spacer()
+                    Text(store.maskedAmount(invoicesTotal))
+                        .font(.subheadline.bold()).monospacedDigit()
+                        .foregroundStyle(VercelTheme.textPrimary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.bold())
+                        .foregroundStyle(VercelTheme.textTertiary)
+                }
+                if invoiceSummaries.isEmpty {
+                    Text(store.t(.dashNoMovement))
+                        .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                } else {
+                    ForEach(invoiceSummaries.prefix(5), id: \.card.id) { summary in
+                        HStack(spacing: FinSpacing.sm) {
+                            Circle()
+                                .fill(summary.paid ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(summary.card.name)
+                                .font(.subheadline)
+                                .foregroundStyle(VercelTheme.textPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(store.maskedAmount(summary.total))
+                                .font(.subheadline).monospacedDigit()
+                                .foregroundStyle(VercelTheme.textSecondary)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    if invoiceSummaries.count > 5 {
+                        Text(String(format: store.t(.dashOthers), invoiceSummaries.count - 5))
+                            .font(.caption).foregroundStyle(VercelTheme.textTertiary)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

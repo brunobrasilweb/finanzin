@@ -56,6 +56,8 @@ targets:
         UILaunchScreen: {}
         NSCameraUsageDescription: "Tire foto do recibo para ler os dados e anexar como comprovante."
         NSPhotoLibraryUsageDescription: "Escolha a foto do recibo para ler os dados e anexar como comprovante."
+        NSMicrophoneUsageDescription: "Grave a descrição do gasto para transcrever no próprio iPhone."
+        NSSpeechRecognitionUsageDescription: "Transcrever sua voz em texto para preencher valor e descrição, de preferência offline."
         CFBundleURLTypes:
           - CFBundleURLName: br.inoovexa.finanzin
             CFBundleURLSchemes: [finanzin]

@@ -41,6 +41,7 @@ swift run FinanzinCoreTests  # 33/33 testes
 - [x] Sprint 4: orçamento mensal (limite por categoria/mês, barra limite vs utilizado, alertas 80%/estouro, totais) — 26/26 testes
 - [x] Sprint 5: desejos (múltiplas listas cor/ícone, itens preço/prioridade/categoria, compra com data, gerar conta a pagar) — 30/30 testes
 - [x] Sprint 6: dashboard (cards, barras 6m, donut, próximos 7d, deep-link categoria → transações) — 33/33 testes
+- [x] Sprint 8: cartões de crédito (cadastro nome/fechamento/vencimento, mesma/próxima fatura, parcelado 1x por fatura, filtro + cabeçalho de fatura com pagar fatura) — 71/71 testes
 
 ## Rodar no iPhone (máquina COM Xcode 16+)
 

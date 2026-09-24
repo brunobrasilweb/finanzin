@@ -96,6 +96,7 @@ public struct ReceiptScanSheet: View {
     @State private var date = Date()
     @State private var categoryID: String?
     @State private var foundSomething = false
+    @State private var scanConfidence = 0.0
 
     public init(
         imageData: Data,
@@ -202,6 +203,13 @@ public struct ReceiptScanSheet: View {
                     .font(.footnote)
                     .foregroundStyle(.orange)
             }
+        } else if scanConfidence < 0.5 {
+            // Leitura incerta (ex.: sem total claro): reforça a conferência.
+            Section {
+                Text(store.t(.txScanHint))
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -216,6 +224,7 @@ public struct ReceiptScanSheet: View {
                 categoryID = ReceiptParser.suggestCategoryID(
                     in: store.categories, scan: scan)
                 foundSomething = scan.amount != nil || scan.merchantName != nil
+                scanConfidence = scan.confidence
                 if lines.isEmpty {
                     errorMessage = store.t(.txScanEmpty)
                 }

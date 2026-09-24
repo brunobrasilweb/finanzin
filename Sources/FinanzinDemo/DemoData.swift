@@ -48,11 +48,14 @@ public enum DemoData {
             if back > 0 { for t in g { store.updateStatus(id: t.id, to: .paid) } }
         }
 
-        // Parcelado atual: iPhone 10x.
+        // Cartões + parcelado no cartão: iPhone 10x (uma parcela por fatura).
+        let nubank = try? store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+        _ = try? store.addCard(name: "Inter", closingDay: 5, dueDay: 12)
         _ = store.create(TransactionEngine.CreateInput(
             description: "iPhone 16", type: .payable, categoryID: lazer,
             amount: 5000, recurrence: .installment, dueDate: day(curY, curM, 8),
-            totalInstallments: 10, interval: .monthly
+            totalInstallments: 10, interval: .monthly,
+            creditCardID: nubank?.id, card: nubank
         ))
 
         // Transporte pendente (próximos 7 dias) + vencido de propósito.

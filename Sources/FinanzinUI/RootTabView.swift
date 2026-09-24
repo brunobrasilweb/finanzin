@@ -10,6 +10,8 @@ public struct RootTabView: View {
     @State private var dashboardCategory: String?
     @State private var showTxForm = false
     @State private var txDraft: TransactionDraft?
+    @State private var showEntryChoice = false
+    @State private var showAISheet = false
     @State private var showBudgetForm = false
     @State private var showWishlistForm = false
 
@@ -26,6 +28,8 @@ public struct RootTabView: View {
                     selectedTab = 1
                 } onSelectBudgets: {
                     selectedTab = 2
+                } onSelectInvoices: {
+                    selectedTab = 1
                 }
                 .hideSystemTabBar()
                 .tabItem { Image(systemName: "chart.bar.fill") }
@@ -75,6 +79,23 @@ public struct RootTabView: View {
             TransactionFormView(year: year, month: month, draft: txDraft)
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showAISheet) {
+            // A IA salva direto; volta a lista para o mês do lançamento.
+            AIRegistrationSheet { savedDate in
+                let cal = Calendar.current
+                year = cal.component(.year, from: savedDate)
+                month = cal.component(.month, from: savedDate)
+            }
+            .environmentObject(store)
+        }
+        .confirmationDialog(
+            store.t(.entryChoiceTitle),
+            isPresented: $showEntryChoice
+        ) {
+            Button(store.t(.entryManual)) { showTxForm = true }
+            Button(store.t(.entryAI)) { showAISheet = true }
+            Button(store.t(.cancel), role: .cancel) {}
+        }
         .sheet(isPresented: $showBudgetForm) {
             BudgetFormView(year: year, month: month)
                 .environmentObject(store)
@@ -115,14 +136,17 @@ public struct RootTabView: View {
     }
 
     /// Ação do + central: abre o cadastro da aba atual
-    /// (Resumo e Transações → transação; Orçamento → limite; Desejos → lista).
+    /// (Resumo e Transações → escolha manual/IA; Orçamento → limite;
+    /// Desejos → lista).
     private func fabTap() {
         switch selectedTab {
         case 2: showBudgetForm = true
         case 3: showWishlistForm = true
-        default: showTxForm = true
+        default: showEntryChoice = true
         }
     }
+
+
 
     #if os(iOS)
     /// Dock mínima (42pt) colada sobre o home indicator, sem vão e sem

@@ -36,7 +36,8 @@ public struct FundListView: View {
                     List {
                         ForEach(store.funds.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }) { fund in
                             card(fund)
-                                .finRow()
+                                .finCleanRow()
+                                .padding(.vertical, 2)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         do { try store.deleteFund(id: fund.id) }
@@ -59,7 +60,7 @@ public struct FundListView: View {
                                 .onTapGesture { selectedID = fund.id }
                         }
                     }
-                    .finList()
+                    .finCleanList()
                 }
             }
             .finBackground()
@@ -242,8 +243,15 @@ public struct FundDetailView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
+                        .finCleanRow()
+                        .listRowSeparator(.hidden)
                     }
-                    Section(store.t(.fundMovementsSection)) {
+                    Section(header:
+                        Text(store.t(.fundMovementsSection))
+                            .font(.caption.bold())
+                            .foregroundStyle(VercelTheme.textTertiary)
+                            .textCase(.uppercase)
+                    ) {
                         ForEach(store.fundTransactions(fundID: fund.id)) { t in
                             HStack(spacing: FinSpacing.md) {
                                 TintedIcon(
@@ -264,7 +272,8 @@ public struct FundDetailView: View {
                                     .monospacedDigit()
                                     .foregroundStyle(t.fundMovementType == .withdrawal ? .orange : .green)
                             }
-                            .finRow()
+                            .finCleanRow()
+                            .padding(.vertical, 2)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     store.deleteTransactions(ids: [t.id])
@@ -283,7 +292,7 @@ public struct FundDetailView: View {
                         }
                     }
                 }
-                .finList()
+                .finCleanList()
                 .navigationTitle(fund.name)
                 .toolbar {
                     ToolbarItemGroup(placement: .primaryAction) {

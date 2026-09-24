@@ -586,9 +586,11 @@ func testResetToDefaults() {
     try! store.saveBudget(categoryID: cat.id, month: 10, year: 2026, limitAmount: 100)
     let list = try! store.addWishlist(name: "L", color: "#fff", icon: "x")
     try! store.addItem(wishlistID: list.id, name: "I", price: 10, priority: .low, categoryID: nil, notes: nil)
+    _ = try! store.addCard(name: "N", closingDay: 10, dueDay: 17)
     let settingsBefore = store.settings
     store.resetToDefaults()
     check(store.transactions.isEmpty, "transações apagadas")
+    check(store.creditCards.isEmpty, "cartões apagados")
     check(store.funds.isEmpty, "fundos apagados")
     check(store.budgets.isEmpty, "orçamentos apagados")
     check(store.wishlists.isEmpty && store.wishlistItems.isEmpty, "listas apagadas")
@@ -860,6 +862,567 @@ func testReceiptNormalizeAmounts() {
     check(ReceiptParser.normalizeAmount("  ") == nil, "vazio → nil")
 }
 
+// MARK: - IA local: prompt/voz → rascunho (TransactionNLParser)
+
+func nlCats() -> [FinanceCategory] {
+    let store = Store(seedIfEmpty: false)
+    Seed.apply(to: store)
+    return store.categories
+}
+
+func testNLParsesBasicExpense() {
+    let r = TransactionNLParser.parse(
+        text: "paguei 45 na padaria ontem",
+        categories: nlCats(), referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 45, "valor inteiro avulso")
+    check(r.type == .payable, "paguei → despesa")
+    check(r.description == "Padaria", "descrição limpa (obtido \(r.description ?? "?"))")
+    check(Calendar.current.component(.day, from: r.date) == 23, "ontem = dia 23")
+    check(r.dateExplicit, "data explícita")
+    check(r.confidence >= 0.8, "confiança alta com valor+descrição+data")
+}
+
+func testNLParsesDecimalAndCategory() {
+    let cats = nlCats()
+    let r = TransactionNLParser.parse(
+        text: "gastei 128,90 no assai",
+        categories: cats, referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 128.90, "decimal com vírgula")
+    check(cats.first { $0.id == r.categoryID }?.name == "Mercado", "assai → Mercado")
+}
+
+func testNLParsesThousands() {
+    let r = TransactionNLParser.parse(
+        text: "comprei iphone por R$ 1.234,56",
+        referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 1234.56, "milhar pt-BR")
+    check((r.description ?? "").lowercased().contains("iphone"), "mantém o produto")
+}
+
+func testNLParsesIncome() {
+    let cats = nlCats()
+    let r = TransactionNLParser.parse(
+        text: "recebi 5000 do salário hoje",
+        categories: cats, referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 5000, "valor da receita")
+    check(r.type == .receivable, "recebi → receita")
+    check(cats.first { $0.id == r.categoryID }?.name == "Salário", "salário → categoria")
+}
+
+func testNLParsesInstallments() {
+    let r = TransactionNLParser.parse(
+        text: "comprei iphone 3000 em 3x",
+        referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 3000, "valor não confunde com 3x")
+    check(r.installmentCount == 3, "3x → 3 parcelas")
+    let r2 = TransactionNLParser.parse(
+        text: "gastei 1200 em 12 parcelas", referenceDate: D(2026, 9, 24))
+    check(r2.installmentCount == 12, "12 parcelas por extenso")
+}
+
+func testNLParsesExplicitDay() {
+    let r = TransactionNLParser.parse(
+        text: "paguei 80 no mercado dia 12",
+        referenceDate: D(2026, 9, 24))
+    let comps = Calendar.current.dateComponents([.day, .month], from: r.date)
+    check(comps.day == 12 && comps.month == 9, "dia 12 do mês atual")
+    check(r.dateExplicit, "dia explícito")
+}
+
+func testNLParsesWeekday() {
+    // 24/09/2026 é quinta: "sexta passada" = 18/09.
+    let r = TransactionNLParser.parse(
+        text: "gastei 60 no uber sexta passada",
+        referenceDate: D(2026, 9, 24))
+    let comps = Calendar.current.dateComponents([.day, .month], from: r.date)
+    check(comps.day == 18 && comps.month == 9, "sexta passada = 18/09 (obtido \(comps.day ?? 0))")
+}
+
+func testNLDefaultsTodayWithoutDate() {
+    let r = TransactionNLParser.parse(
+        text: "gastei 20 no café", referenceDate: D(2026, 9, 24))
+    check(!r.dateExplicit, "sem data → hoje implícito")
+    check(Calendar.current.component(.day, from: r.date) == 24, "data = referência")
+}
+
+func testNLEmptyText() {
+    let r = TransactionNLParser.parse(text: "   ", referenceDate: D(2026, 9, 24))
+    check(r.amount == nil && r.confidence == 0, "vazio → sem valor e confiança 0")
+}
+
+func testNLWithoutValueLowConfidence() {
+    let r = TransactionNLParser.parse(
+        text: "paguei a padaria", referenceDate: D(2026, 9, 24))
+    check(r.amount == nil, "sem número → sem valor")
+    check((r.description ?? "").lowercased().contains("padaria"), "descrição preservada")
+    check(r.confidence < 0.5, "confiança baixa sem valor")
+}
+
+func testNLToDraftMapping() {
+    let cats = nlCats()
+    let r = TransactionNLParser.parse(
+        text: "recebi 200 do freelance ontem",
+        categories: cats, referenceDate: D(2026, 9, 24))
+    let draft = r.toDraft()
+    eq(draft.amount ?? 0, 200, "draft leva valor")
+    check(draft.type == .receivable, "draft leva tipo")
+    check(draft.categoryID == r.categoryID, "draft leva categoria")
+    check(Calendar.current.component(.day, from: draft.date ?? Date()) == 23, "draft leva data")
+}
+
+func testNLIgnoresYearLikeNumbers() {
+    let r = TransactionNLParser.parse(
+        text: "paguei 90 no mercado 12/09",
+        referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 90, "data não vira valor")
+    let comps = Calendar.current.dateComponents([.day, .month], from: r.date)
+    check(comps.day == 12 && comps.month == 9, "12/09 vira data")
+}
+
+func testNLDescriptionQuality() {
+    var r = TransactionNLParser.parse(
+        text: "paguei conta de luz 150", referenceDate: D(2026, 9, 24))
+    check(r.description == "Conta de Luz", "conta de X preservada (obtido \(r.description ?? "?"))")
+    r = TransactionNLParser.parse(
+        text: "comprei pao de acucar 200", referenceDate: D(2026, 9, 24))
+    check(r.description == "Pao de Acucar", "nome composto (obtido \(r.description ?? "?"))")
+    r = TransactionNLParser.parse(
+        text: "paguei 45 na padaria do centro ontem", referenceDate: D(2026, 9, 24))
+    check(r.description == "Padaria do Centro", "lugar composto (obtido \(r.description ?? "?"))")
+    r = TransactionNLParser.parse(
+        text: "corte de cabelo 80", referenceDate: D(2026, 9, 24))
+    check(r.description == "Corte de Cabelo", "serviço (obtido \(r.description ?? "?"))")
+    r = TransactionNLParser.parse(
+        text: "gastei 30 com uber", referenceDate: D(2026, 9, 24))
+    check(r.description == "Uber", "conector no meio sai das pontas (obtido \(r.description ?? "?"))")
+}
+
+func testNLSuggestsEverydayCategories() {
+    let cats = nlCats()
+    let cases: [(String, String)] = [
+        ("gastei 60 no ifood", "Lazer"),
+        ("paguei 120 academia", "Saúde"),
+        ("netflix 55 mensal", "Lazer"),
+        ("paguei ipva 800", "Transporte"),
+        ("paguei conta de luz 150", "Moradia"),
+        ("corte de cabelo 80", "Saúde"),
+        ("comprei passagem 300", "Lazer"),
+        ("feira 35", "Mercado"),
+        ("paguei onibus 5,50", "Transporte"),
+        ("paguei 200 escola das crianças", "Educação"),
+    ]
+    for (text, expected) in cases {
+        let r = TransactionNLParser.parse(
+            text: text, categories: cats, referenceDate: D(2026, 9, 24))
+        let name = cats.first { $0.id == r.categoryID }?.name ?? "nil"
+        check(name == expected, "'\(text)' → \(expected) (obtido \(name))")
+    }
+}
+
+func testNLRecurrenceDetection() {
+    var r = TransactionNLParser.parse(
+        text: "paguei 150 conta de luz todo mês", referenceDate: D(2026, 9, 24))
+    check(r.recurrence == .fixed && r.interval == nil, "todo mês → fixa")
+    check(r.description == "Conta de Luz", "recorrência sai da descrição")
+    r = TransactionNLParser.parse(
+        text: "netflix 55 mensal", referenceDate: D(2026, 9, 24))
+    check(r.recurrence == .recurring && r.interval == .monthly, "mensal → recorrente mensal")
+    check(r.description == "Netflix", "mensal sai da descrição")
+    r = TransactionNLParser.parse(
+        text: "curso 200 toda semana", referenceDate: D(2026, 9, 24))
+    check(r.recurrence == .recurring && r.interval == .weekly, "toda semana → semanal")
+    r = TransactionNLParser.parse(
+        text: "aluguel 1500", referenceDate: D(2026, 9, 24))
+    check(r.recurrence == .unique && r.interval == nil, "sem marcador → avulsa")
+    r = TransactionNLParser.parse(
+        text: "comprei iphone 3000 em 3x", referenceDate: D(2026, 9, 24))
+    check(r.installmentCount == 3 && r.recurrence == .unique, "3x é parcela, não recorrência")
+}
+
+func nlCards() -> [CreditCard] {
+    [
+        CreditCard(name: "Nubank", closingDay: 10, dueDay: 17),
+        CreditCard(name: "Inter", closingDay: 5, dueDay: 12),
+    ]
+}
+
+func testNLCardDetection() {
+    let cards = nlCards()
+    let nubank = cards[0].id
+    var r = TransactionNLParser.parse(
+        text: "paguei 500 no cartão nubank", cards: cards,
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nubank && r.payOnCard, "nome citado seleciona")
+    // Genérico com 2 ativos: indica cartão, deixa escolher no form.
+    r = TransactionNLParser.parse(
+        text: "paguei 200 no cartão", cards: cards,
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nil && r.payOnCard, "genérico com 2 cartões → payOnCard sem id")
+    // Genérico com 1 ativo: seleciona o único.
+    r = TransactionNLParser.parse(
+        text: "paguei 200 no crédito", cards: [cards[0]],
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nubank && r.payOnCard, "genérico com 1 cartão → ele")
+    r = TransactionNLParser.parse(
+        text: "paguei 100 no débito", cards: cards,
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nil && !r.payOnCard, "débito é à vista")
+    r = TransactionNLParser.parse(
+        text: "comprei 900 em 3x", cards: [cards[0]],
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nubank && r.payOnCard, "parcelado indica cartão")
+    r = TransactionNLParser.parse(
+        text: "paguei 50 no pix", cards: cards,
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nil && !r.payOnCard, "pix é à vista")
+    r = TransactionNLParser.parse(
+        text: "gastei 30 na padaria", cards: nil,
+        referenceDate: D(2026, 9, 24))
+    check(r.creditCardID == nil && !r.payOnCard, "sem cartões → à vista")
+}
+
+func testNLFreelaIncome() {
+    let cats = nlCats()
+    let r = TransactionNLParser.parse(
+        text: "recebi 200 do freela", categories: cats,
+        referenceDate: D(2026, 9, 24))
+    check(r.type == .receivable, "recebi → receita")
+    check(cats.first { $0.id == r.categoryID }?.name == "Freelance", "freela → Freelance")
+}
+
+func testNLEnglishBasic() {
+    let r = TransactionNLParser.parse(
+        text: "paid 45 at the bakery yesterday",
+        referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 45, "valor EN")
+    check(r.description == "Bakery", "descrição EN (obtido \(r.description ?? "?"))")
+    check(r.type == .payable, "paid → despesa")
+    check(Calendar.current.component(.day, from: r.date) == 23, "yesterday = dia 23")
+    check(r.dateExplicit, "data explícita")
+}
+
+func testNLEnglishIncome() {
+    let cats = nlCats()
+    let r = TransactionNLParser.parse(
+        text: "received 5000 salary today",
+        categories: cats, referenceDate: D(2026, 9, 24))
+    eq(r.amount ?? 0, 5000, "valor da receita EN")
+    check(r.type == .receivable, "received → receita")
+    check(cats.first { $0.id == r.categoryID }?.name == "Salário", "salary → Salário")
+}
+
+func testNLEnglishRecurrenceAndCategories() {
+    let cats = nlCats()
+    var r = TransactionNLParser.parse(
+        text: "netflix 55 every month",
+        categories: cats, referenceDate: D(2026, 9, 24))
+    check(r.recurrence == .recurring && r.interval == .monthly, "every month → mensal")
+    check(cats.first { $0.id == r.categoryID }?.name == "Lazer", "netflix → Lazer")
+    r = TransactionNLParser.parse(
+        text: "grocery 120", categories: cats,
+        referenceDate: D(2026, 9, 24))
+    check(r.description == "Grocery", "descrição EN")
+    check(cats.first { $0.id == r.categoryID }?.name == "Mercado", "grocery → Mercado")
+    r = TransactionNLParser.parse(
+        text: "gym monday 100", categories: cats,
+        referenceDate: D(2026, 9, 24))
+    check(cats.first { $0.id == r.categoryID }?.name == "Saúde", "gym → Saúde")
+    let comps = Calendar.current.dateComponents([.day, .month], from: r.date)
+    check(comps.day == 21 && comps.month == 9, "monday antes da quinta 24 → dia 21")
+    r = TransactionNLParser.parse(
+        text: "dentist 200 sept 12", categories: cats,
+        referenceDate: D(2026, 9, 24))
+    check(cats.first { $0.id == r.categoryID }?.name == "Saúde", "dentist → Saúde")
+    let c2 = Calendar.current.dateComponents([.day, .month], from: r.date)
+    check(c2.day == 12 && c2.month == 9, "sept 12 vira data")
+}
+
+/// Guarda thread-safe para testar provider async no runner síncrono.
+final class NLResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: NLParseResult?
+    var value: NLParseResult? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); defer { lock.unlock() }; stored = newValue }
+    }
+}
+
+func testNLProviderParity() {
+    let box = NLResultBox()
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        box.value = await RuleBasedNLParser().parse(
+            text: "paguei 45 na padaria ontem",
+            categories: nlCats(), cards: [],
+            referenceDate: D(2026, 9, 24)
+        )
+        sem.signal()
+    }
+    sem.wait()
+    eq(box.value?.amount ?? 0, 45, "provider devolve valor")
+    check(box.value?.description == "Padaria", "provider devolve descrição")
+    check(box.value?.type == .payable, "provider devolve tipo")
+}
+
+func testNLDraftCarriesAll() {
+    let cats = nlCats()
+    let cards = nlCards()
+    let r = TransactionNLParser.parse(
+        text: "paguei 150 conta de luz todo mês no cartão",
+        categories: cats, cards: [cards[0]], referenceDate: D(2026, 9, 24))
+    let draft = r.toDraft()
+    eq(draft.amount ?? 0, 150, "draft leva valor")
+    check(draft.description == "Conta de Luz", "draft leva descrição")
+    check(cats.first { $0.id == draft.categoryID }?.name == "Moradia", "draft leva categoria")
+    check(draft.recurrence == .fixed, "draft leva recorrência")
+    check(draft.creditCardID == cards[0].id && draft.payOnCard, "draft leva cartão")
+}
+
+// MARK: - Sprint 8: cartões de crédito e faturas
+
+func testInvoiceSameOrNext() {
+    let card = CreditCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    let same = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 8), card: card)
+    check(same.year == 2026 && same.month == 9, "dia 8 (<= fechamento 10) cai na fatura atual")
+    check(Calendar.current.component(.day, from: same.dueDate) == 17, "fatura atual vence dia 17")
+    let edge = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 10), card: card)
+    check(edge.month == 9, "no dia do fechamento ainda é a fatura atual")
+    let next = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 12), card: card)
+    check(next.year == 2026 && next.month == 10, "dia 12 (> fechamento) vai para a próxima")
+    let yearEnd = InvoiceService.invoiceFor(purchaseDate: D(2026, 12, 20), card: card)
+    check(yearEnd.year == 2027 && yearEnd.month == 1, "dezembro após fechamento vira jan/27")
+}
+
+func testInvoiceDueDayClamp() {
+    let due = InvoiceService.invoiceDueDate(year: 2026, month: 2, dueDay: 28)
+    let comps = Calendar.current.dateComponents([.month, .day], from: due)
+    check(comps.month == 2 && comps.day == 28, "fev/26 vence dia 28 sem estourar")
+}
+
+func testInvoiceClosed() {
+    let card = CreditCard(name: "N", closingDay: 10, dueDay: 17)
+    check(InvoiceService.isClosed(card: card, year: 2026, month: 9, now: D(2026, 9, 11)), "dia 11 > fechamento 10 = fechada")
+    check(!InvoiceService.isClosed(card: card, year: 2026, month: 9, now: D(2026, 9, 10)), "no dia do fechamento ainda aberta")
+}
+
+func testCardValidation() {
+    check(InvoiceService.validateCard(name: "  ", closingDay: 10, dueDay: 17) == ["Nome do cartão é obrigatório."], "nome obrigatório")
+    check(InvoiceService.validateCard(name: "X", closingDay: 0, dueDay: 17) == ["Fechamento e vencimento devem ser entre 1 e 31."], "dia 0 inválido")
+    check(InvoiceService.validateCard(name: "X", closingDay: 10, dueDay: 32) == ["Fechamento e vencimento devem ser entre 1 e 31."], "dia 32 inválido")
+    check(InvoiceService.validateCard(name: "X", closingDay: 30, dueDay: 5).isEmpty, "dias 29-31 valem (clamp)")
+    check(InvoiceService.validateCard(name: "Nubank", closingDay: 10, dueDay: 17).isEmpty, "cartão válido sem erros")
+    check(InvoiceService.validateCard(name: "  ", closingDay: 10, dueDay: 17, language: .en) == ["Card name is required."], "erro EN nome")
+}
+
+func testInvoiceDueBeforeClosingGoesNext() {
+    // Cartão que fecha dia 28 e vence dia 10: compra 24/09 cai na fatura
+    // de OUTUBRO (vence 10/10) — nunca na de setembro, já fechada/vencida.
+    let card = CreditCard(name: "X", closingDay: 28, dueDay: 10)
+    let inv = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 24), card: card)
+    check(inv.year == 2026 && inv.month == 10, "24/09 vai para a fatura de out (obtido \(inv.month))")
+    check(Calendar.current.component(.day, from: inv.dueDate) == 10, "vence dia 10")
+    // Dia do fechamento ainda é da fatura que está fechando (vence 10/10);
+    // dia seguinte já é da próxima (vence 10/11).
+    let edge = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 28), card: card)
+    check(edge.month == 10, "28/09 (fechamento) ainda vence 10/10")
+    let after = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 29), card: card)
+    check(after.month == 11, "29/09 já vence 10/11")
+}
+
+func testInvoiceClosingDay30() {
+    // Fecha dia 30, vence dia 5: 24/09 vai para a fatura de outubro.
+    let card = CreditCard(name: "X", closingDay: 30, dueDay: 5)
+    let inv = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 24), card: card)
+    check(inv.year == 2026 && inv.month == 10, "24/09 com fechamento 30 vai para out")
+    check(Calendar.current.component(.day, from: inv.dueDate) == 5, "vence dia 5")
+    let edge = InvoiceService.invoiceFor(purchaseDate: D(2026, 9, 30), card: card)
+    check(edge.month == 10, "no dia do fechamento ainda é a mesma fatura")
+    let after = InvoiceService.invoiceFor(purchaseDate: D(2026, 10, 1), card: card)
+    check(after.year == 2026 && after.month == 11, "01/10 já é a fatura de nov")
+}
+
+func testCardInstallmentsDueBeforeClosing() {
+    // 2x de 24/09 no cartão fecha-28/vence-10 → vencimentos 10/10 e 10/11.
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "X", closingDay: 28, dueDay: 10)
+    let items = store.create(.init(
+        description: "TV", type: .payable, amount: 2000,
+        recurrence: .installment, dueDate: D(2026, 9, 24),
+        totalInstallments: 2, interval: .monthly,
+        creditCardID: card.id, card: card
+    ))
+    let cal = Calendar.current
+    let months = items.map { cal.component(.month, from: $0.dueDate) }
+    check(months == [10, 11], "parcelas em out/nov (obtido \(months))")
+    check(items.allSatisfy { cal.component(.day, from: $0.dueDate) == 10 }, "todas vencem dia 10")
+}
+
+func testCardCRUD() {
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    check(store.activeCards.count == 1, "1 cartão ativo")
+    do {
+        _ = try store.addCard(name: "nubank", closingDay: 1, dueDay: 2)
+        check(false, "nome duplicado deveria lançar")
+    } catch Store.CardError.duplicateName {
+        check(true, "duplicado lança duplicateName")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    do {
+        _ = try store.addCard(name: "Outro", closingDay: 0, dueDay: 5)
+        check(false, "dia 0 deveria lançar")
+    } catch Store.CardError.invalidDay {
+        check(true, "lança invalidDay")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Arquivar some do form mas mantém o cadastro.
+    store.setCardActive(id: card.id, active: false)
+    check(store.activeCards.isEmpty, "arquivado some dos ativos")
+    check(store.card(id: card.id)?.isActive == false, "flag persiste")
+    // Exclusão com lançamentos vinculados é bloqueada.
+    _ = store.create(.init(
+        description: "Compra", type: .payable, amount: 100,
+        dueDate: D(2026, 9, 8), creditCardID: card.id, card: store.card(id: card.id)
+    ))
+    do {
+        try store.deleteCard(id: card.id)
+        check(false, "com lançamentos deveria lançar")
+    } catch Store.CardError.hasTransactions {
+        check(true, "bloqueia com hasTransactions")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Cartão sem lançamentos exclui normal.
+    let clean = try! store.addCard(name: "Limpo", closingDay: 1, dueDay: 2)
+    try! store.deleteCard(id: clean.id)
+    check(store.card(id: clean.id) == nil, "cartão vazio excluído")
+}
+
+func testCardPurchaseUniqueGoesToInvoice() {
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    let items = store.create(.init(
+        description: "Farmácia", type: .payable, amount: 90,
+        dueDate: D(2026, 9, 12), creditCardID: card.id, card: card
+    ))
+    check(items.count == 1, "à vista gera 1 item")
+    let cal = Calendar.current
+    check(cal.component(.month, from: items[0].dueDate) == 10, "dia 12 cai na fatura de out")
+    check(cal.component(.day, from: items[0].dueDate) == 17, "vence dia 17")
+    check(items[0].creditCardID == card.id, "vínculo com o cartão")
+}
+
+func testCardInstallmentsAcrossInvoices() {
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    let items = store.create(.init(
+        description: "TV", type: .payable, amount: 3000,
+        recurrence: .installment, dueDate: D(2026, 9, 12),
+        totalInstallments: 3, interval: .monthly,
+        creditCardID: card.id, card: card
+    ))
+    check(items.count == 3, "3 parcelas geradas")
+    let cal = Calendar.current
+    let months = items.map { cal.component(.month, from: $0.dueDate) }
+    check(months == [10, 11, 12], "uma parcela por fatura: out/nov/dez (obtido \(months))")
+    check(items.allSatisfy { cal.component(.day, from: $0.dueDate) == 17 }, "todas vencem dia 17")
+    eq(items.reduce(Decimal(0)) { $0 + $1.amount }, 3000, "soma == total")
+    check(items.allSatisfy { $0.creditCardID == card.id }, "vínculo propagado às filhas")
+}
+
+func testPayInvoice() {
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    _ = store.create(.init(description: "A", type: .payable, amount: 100, dueDate: D(2026, 9, 8), creditCardID: card.id, card: card))
+    _ = store.create(.init(description: "B", type: .payable, amount: 50, dueDate: D(2026, 9, 9), creditCardID: card.id, card: card))
+    _ = store.create(.init(description: "Outro mês", type: .payable, amount: 70, dueDate: D(2026, 9, 20), creditCardID: card.id, card: card))
+    // A e B vencem 17/09; "Outro mês" (dia 20 > fechamento) vence 17/10.
+    let sept = store.invoiceTransactions(cardID: card.id, year: 2026, month: 9)
+    check(sept.count == 2, "fatura de set tem 2 (obtido \(sept.count))")
+    eq(store.invoiceTotal(cardID: card.id, year: 2026, month: 9), 150, "total da fatura")
+    let paid = store.payInvoice(cardID: card.id, year: 2026, month: 9, paidDate: D(2026, 9, 17))
+    check(paid == 2, "baixa única quita 2 contas")
+    check(InvoiceService.isPaid(store.invoiceTransactions(cardID: card.id, year: 2026, month: 9)), "fatura marcada como paga")
+    let oct = store.invoiceTransactions(cardID: card.id, year: 2026, month: 10)
+    check(oct.count == 1 && oct[0].status == .pending, "fatura de out intacta e pendente")
+    check(store.payInvoice(cardID: card.id, year: 2026, month: 9, paidDate: D(2026, 9, 17)) == 0, "pagar de novo baixa 0")
+}
+
+func testDeleteInvoiceRemovesAllEntries() {
+    let store = Store(seedIfEmpty: false)
+    let card = try! store.addCard(name: "Nubank", closingDay: 10, dueDay: 17)
+    func add(_ desc: String, _ day: Int, _ status: TransactionStatus = .pending) {
+        let items = store.create(.init(
+            description: desc, type: .payable, amount: 10,
+            dueDate: D(2026, 9, day), creditCardID: card.id, card: card
+        ))
+        if status != .pending { store.updateStatus(id: items[0].id, to: status) }
+    }
+    add("Pendente", 8)
+    add("Paga", 9, .paid)
+    add("Cancelada", 9, .canceled)
+    add("Outro mês", 20)
+    // Excluir a fatura de set (inclui pagos e cancelados, como o detalhe faz).
+    let ids = InvoiceService.transactions(
+        store.transactions, cardID: card.id, year: 2026, month: 9, includeCanceled: true
+    ).map(\.id)
+    check(ids.count == 3, "fatura de set tem 3 lançamentos (obtido \(ids.count))")
+    store.deleteTransactions(ids: ids)
+    check(store.invoiceTransactions(cardID: card.id, year: 2026, month: 9).isEmpty, "fatura de set esvaziada")
+    check(store.invoiceTransactions(cardID: card.id, year: 2026, month: 10).count == 1, "outubro intacta")
+}
+
+func testMonthlyInvoicesTotalAcrossCards() {
+    let store = Store(seedIfEmpty: false)
+    let a = try! store.addCard(name: "A", closingDay: 10, dueDay: 17)
+    let b = try! store.addCard(name: "B", closingDay: 10, dueDay: 17)
+    func buy(_ desc: String, _ amount: Decimal, _ day: Int, _ card: CreditCard?) {
+        _ = store.create(.init(
+            description: desc, type: .payable, amount: amount,
+            dueDate: D(2026, 9, day), creditCardID: card?.id, card: card
+        ))
+    }
+    buy("A1", 100, 8, a)
+    buy("A2", 50, 9, a)
+    buy("B1", 200, 8, b)
+    buy("À vista", 999, 8, nil)
+    let total = store.creditCards.reduce(Decimal(0)) {
+        $0 + store.invoiceTotal(cardID: $1.id, year: 2026, month: 9)
+    }
+    eq(total, 350, "soma das faturas de set (à vista fora)")
+    eq(store.invoiceTotal(cardID: b.id, year: 2026, month: 9), 200, "fatura do cartão B")
+}
+
+func testFilterByCard() {
+    let card = CreditCard(name: "N", closingDay: 10, dueDay: 17)
+    let a = FinancialTransaction(description: "Cartão", type: .payable, amount: 10, dueDate: D(2026, 9, 17), creditCardID: card.id)
+    let b = FinancialTransaction(description: "Conta", type: .payable, amount: 10, dueDate: D(2026, 9, 17))
+    let out = TransactionEngine.filter([a, b], year: 2026, month: 9, creditCardID: card.id)
+    check(out.count == 1 && out[0].description == "Cartão", "filtro por cartão")
+    // A listagem geral exclui compras no cartão (só vivem na fatura).
+    let listing = TransactionEngine.filter([a, b], year: 2026, month: 9, includeCardPurchases: false)
+    check(listing.count == 1 && listing[0].description == "Conta", "listagem sem compras no cartão")
+    let full = TransactionEngine.filter([a, b], year: 2026, month: 9)
+    check(full.count == 2, "default inclui tudo (compat)")
+}
+
+func testCardSnapshotCompatOldJSON() {
+    // JSON antigo: sem `creditCards` e sem `creditCardID` nas transações.
+    let dir = testAttachmentsDir()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let json = dir.appendingPathComponent("finanzin.json")
+    let raw = """
+    {"categories":[],"transactions":[{"id":"t1","description":"Antiga","type":"payable","recurrence":"unique","totalAmount":10,"amount":10,"installmentCount":1,"dueDate":789123456,"status":"pending"}],"funds":[],"budgets":[],"wishlists":[],"wishlistItems":[]}
+    """
+    try! Data(raw.utf8).write(to: json)
+    let store = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    check(store.creditCards.isEmpty, "JSON antigo abre sem cartões")
+    check(store.transactions.count == 1, "transação antiga carrega")
+    check(store.transactions[0].creditCardID == nil, "sem vínculo de cartão")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -925,6 +1488,43 @@ struct TestRunner {
             ("testReceiptSuggestsCategory", testReceiptSuggestsCategory),
             ("testReceiptDraftMapping", testReceiptDraftMapping),
             ("testReceiptNormalizeAmounts", testReceiptNormalizeAmounts),
+            ("testNLParsesBasicExpense", testNLParsesBasicExpense),
+            ("testNLParsesDecimalAndCategory", testNLParsesDecimalAndCategory),
+            ("testNLParsesThousands", testNLParsesThousands),
+            ("testNLParsesIncome", testNLParsesIncome),
+            ("testNLParsesInstallments", testNLParsesInstallments),
+            ("testNLParsesExplicitDay", testNLParsesExplicitDay),
+            ("testNLParsesWeekday", testNLParsesWeekday),
+            ("testNLDefaultsTodayWithoutDate", testNLDefaultsTodayWithoutDate),
+            ("testNLEmptyText", testNLEmptyText),
+            ("testNLWithoutValueLowConfidence", testNLWithoutValueLowConfidence),
+            ("testNLToDraftMapping", testNLToDraftMapping),
+            ("testNLIgnoresYearLikeNumbers", testNLIgnoresYearLikeNumbers),
+            ("testNLDescriptionQuality", testNLDescriptionQuality),
+            ("testNLSuggestsEverydayCategories", testNLSuggestsEverydayCategories),
+            ("testNLRecurrenceDetection", testNLRecurrenceDetection),
+            ("testNLCardDetection", testNLCardDetection),
+            ("testNLFreelaIncome", testNLFreelaIncome),
+            ("testNLEnglishBasic", testNLEnglishBasic),
+            ("testNLEnglishIncome", testNLEnglishIncome),
+            ("testNLEnglishRecurrenceAndCategories", testNLEnglishRecurrenceAndCategories),
+            ("testNLProviderParity", testNLProviderParity),
+            ("testNLDraftCarriesAll", testNLDraftCarriesAll),
+            ("testInvoiceSameOrNext", testInvoiceSameOrNext),
+            ("testInvoiceDueDayClamp", testInvoiceDueDayClamp),
+            ("testInvoiceDueBeforeClosingGoesNext", testInvoiceDueBeforeClosingGoesNext),
+            ("testInvoiceClosingDay30", testInvoiceClosingDay30),
+            ("testCardInstallmentsDueBeforeClosing", testCardInstallmentsDueBeforeClosing),
+            ("testInvoiceClosed", testInvoiceClosed),
+            ("testCardValidation", testCardValidation),
+            ("testCardCRUD", testCardCRUD),
+            ("testCardPurchaseUniqueGoesToInvoice", testCardPurchaseUniqueGoesToInvoice),
+            ("testCardInstallmentsAcrossInvoices", testCardInstallmentsAcrossInvoices),
+            ("testPayInvoice", testPayInvoice),
+            ("testFilterByCard", testFilterByCard),
+            ("testMonthlyInvoicesTotalAcrossCards", testMonthlyInvoicesTotalAcrossCards),
+            ("testDeleteInvoiceRemovesAllEntries", testDeleteInvoiceRemovesAllEntries),
+            ("testCardSnapshotCompatOldJSON", testCardSnapshotCompatOldJSON),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

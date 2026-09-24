@@ -32,6 +32,48 @@ public struct FinanceCategory: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+/// Cartão de crédito para gestão de faturas (Sprint 8).
+/// Dias de 1...31 (meses curtos ajustam sozinhos via clamp).
+public struct CreditCard: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var name: String
+    public var closingDay: Int
+    public var dueDay: Int
+    public var isActive: Bool
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        name: String,
+        closingDay: Int,
+        dueDay: Int,
+        isActive: Bool = true,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.closingDay = closingDay
+        self.dueDay = dueDay
+        self.isActive = isActive
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, closingDay, dueDay, isActive, createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        closingDay = try c.decode(Int.self, forKey: .closingDay)
+        dueDay = try c.decode(Int.self, forKey: .dueDay)
+        // Compat: JSON antigo não tem a chave.
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+}
+
 public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
     public var id: String
     public var description: String
@@ -50,6 +92,8 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
     public var parentID: String?
     public var fundID: String?
     public var fundMovementType: FundMovementType?
+    /// Cartão da compra (`nil` = à vista/conta comum). Define a fatura via `InvoiceService`.
+    public var creditCardID: String?
     public var createdAt: Date
 
     public init(
@@ -70,6 +114,7 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
         parentID: String? = nil,
         fundID: String? = nil,
         fundMovementType: FundMovementType? = nil,
+        creditCardID: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -89,13 +134,47 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
         self.parentID = parentID
         self.fundID = fundID
         self.fundMovementType = fundMovementType
+        self.creditCardID = creditCardID
         self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, description, type, recurrence, categoryID, totalAmount, amount
+        case installmentCount, currentInstallment, installmentInterval
+        case dueDate, paidDate, status, notes, parentID, fundID, fundMovementType
+        case creditCardID, createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        description = try c.decode(String.self, forKey: .description)
+        type = try c.decode(TransactionType.self, forKey: .type)
+        recurrence = try c.decode(RecurrenceType.self, forKey: .recurrence)
+        categoryID = try c.decodeIfPresent(String.self, forKey: .categoryID)
+        totalAmount = try c.decode(Decimal.self, forKey: .totalAmount)
+        amount = try c.decode(Decimal.self, forKey: .amount)
+        installmentCount = try c.decodeIfPresent(Int.self, forKey: .installmentCount) ?? 1
+        currentInstallment = try c.decodeIfPresent(Int.self, forKey: .currentInstallment)
+        installmentInterval = try c.decodeIfPresent(InstallmentInterval.self, forKey: .installmentInterval)
+        dueDate = try c.decode(Date.self, forKey: .dueDate)
+        paidDate = try c.decodeIfPresent(Date.self, forKey: .paidDate)
+        status = try c.decode(TransactionStatus.self, forKey: .status)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        parentID = try c.decodeIfPresent(String.self, forKey: .parentID)
+        fundID = try c.decodeIfPresent(String.self, forKey: .fundID)
+        fundMovementType = try c.decodeIfPresent(FundMovementType.self, forKey: .fundMovementType)
+        // Compat: JSON antigo não tem a chave.
+        creditCardID = try c.decodeIfPresent(String.self, forKey: .creditCardID)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 
     public var isChild: Bool { parentID != nil }
     public var isOverdue: Bool {
         status == .pending && dueDate < Calendar.current.startOfDay(for: Date())
     }
+    /// Compra no cartão (`creditCardID` preenchido).
+    public var isCardPurchase: Bool { creditCardID != nil }
 }
 
 public struct Fund: Identifiable, Hashable, Codable, Sendable {

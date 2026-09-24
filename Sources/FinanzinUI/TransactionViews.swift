@@ -13,11 +13,14 @@ public struct TransactionListView: View {
     @Binding var month: Int
 
     @State private var showingCategories = false
+    @State private var showingCards = false
     @State private var editing: FinancialTransaction?
     @State private var settling: FinancialTransaction?
     @State private var pendingDelete: FinancialTransaction?
     @State private var typeFilter: TransactionType?
     @State private var statusFilter: TransactionStatus?
+    @State private var cardFilter: String?
+    @State private var selectedInvoice: CreditCard?
     @Binding var categoryID: String?
     @State private var search = ""
     @FocusState private var searchFocused: Bool
@@ -33,6 +36,7 @@ public struct TransactionListView: View {
             VStack(spacing: FinSpacing.sm) {
                 ScreenHeader(store.t(.txTitle)) {
                     PrivacyEyeButton()
+                    HeaderButton("creditcard") { showingCards = true }
                     HeaderButton("tag") { showingCategories = true }
                 }
                 MonthPicker(
@@ -75,7 +79,7 @@ public struct TransactionListView: View {
                     .padding(.horizontal, FinSpacing.lg)
                 }
 
-                if filtered.isEmpty {
+                if filtered.isEmpty && invoiceEntries.isEmpty {
                         EmptyStateView(
                             title: store.t(.txEmptyTitle),
                             subtitle: store.t(.txEmptySubtitle),
@@ -83,6 +87,17 @@ public struct TransactionListView: View {
                         )
                     } else {
                         List {
+                            if !invoiceEntries.isEmpty {
+                                Section(store.t(.invoiceSection)) {
+                                    ForEach(invoiceEntries, id: \.card.id) { entry in
+                                        invoiceRow(entry)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+                                            .listRowSeparatorTint(VercelTheme.border.opacity(0.6))
+                                            .onTapGesture { selectedInvoice = entry.card }
+                                    }
+                                }
+                            }
                             ForEach(filtered) { t in
                                 row(t)
                                     .listRowBackground(Color.clear)
@@ -135,6 +150,15 @@ public struct TransactionListView: View {
                 CategoryListView()
                     .environmentObject(store)
             }
+            .sheet(isPresented: $showingCards) {
+                CreditCardListView()
+                    .environmentObject(store)
+            }
+            .navigationDestination(item: $selectedInvoice) { card in
+                if store.card(id: card.id) != nil {
+                    InvoiceDetailView(card: card, year: year, month: month)
+                }
+            }
             .sheet(item: $editing) { t in
                 TransactionFormView(editing: t, year: year, month: month)
                     .environmentObject(store)
@@ -181,7 +205,73 @@ public struct TransactionListView: View {
     }
 
     private var hasActiveFilters: Bool {
-        statusFilter != nil || categoryID != nil
+        statusFilter != nil || categoryID != nil || cardFilter != nil
+    }
+
+    // MARK: - Faturas do mês (uma linha por cartão → detalhe)
+
+    private struct InvoiceEntry {
+        var card: CreditCard
+        var items: [FinancialTransaction]
+        var total: Decimal
+    }
+
+    /// Uma linha "Fatura do {cartão}" por cartão com lançamentos no mês.
+    /// Escondida com busca/filtro de status (totais sairiam do contexto) e
+    /// no filtro "A receber" (cartão só gera conta a pagar).
+    private var invoiceEntries: [InvoiceEntry] {
+        guard search.isEmpty, statusFilter == nil, typeFilter != .receivable else { return [] }
+        return store.creditCards
+            .filter { cardFilter == nil || $0.id == cardFilter }
+            .sorted { $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending }
+            .compactMap { card in
+                let items = store.invoiceTransactions(cardID: card.id, year: year, month: month)
+                guard !items.isEmpty else { return nil }
+                return InvoiceEntry(card: card, items: items, total: InvoiceService.total(items))
+            }
+    }
+
+    private func invoiceStatus(_ entry: InvoiceEntry) -> (String, Color) {
+        if InvoiceService.isPaid(entry.items) { return (store.t(.invoicePaid), .green) }
+        if InvoiceService.isClosed(card: entry.card, year: year, month: month) {
+            return (store.t(.invoiceClosed), .orange)
+        }
+        return (store.t(.invoiceOpen), .blue)
+    }
+
+    private func invoiceRow(_ entry: InvoiceEntry) -> some View {
+        let (statusLabel, statusColor) = invoiceStatus(entry)
+        let due = InvoiceService.invoiceDueDate(year: year, month: month, dueDay: entry.card.dueDay)
+        return HStack(spacing: FinSpacing.md) {
+            Image(systemName: "creditcard.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 32, height: 32)
+                .background(VercelTheme.inset)
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(format: store.t(.invoiceOf), entry.card.name))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Text("\(String(format: store.t(.invoiceDueOn), shortDate(due))) • \(statusLabel)")
+                    .font(.caption)
+                    .foregroundStyle(VercelTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(store.maskedAmount(entry.total))
+                    .font(.subheadline.bold())
+                    .monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.bold())
+                    .foregroundStyle(VercelTheme.textTertiary)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityHint(statusLabel)
     }
 
     private var searchField: some View {
@@ -232,6 +322,20 @@ public struct TransactionListView: View {
                     }
                 }
             }
+            if !store.creditCards.isEmpty {
+                Section(store.t(.cardFilter)) {
+                    Button { cardFilter = nil } label: {
+                        statusOption(store.t(.all), active: cardFilter == nil)
+                    }
+                    ForEach(store.creditCards.sorted {
+                        $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending
+                    }) { card in
+                        Button { cardFilter = card.id } label: {
+                            statusOption(card.name, active: cardFilter == card.id)
+                        }
+                    }
+                }
+            }
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "line.3.horizontal.decrease")
@@ -260,11 +364,13 @@ public struct TransactionListView: View {
     }
 
     private var filtered: [FinancialTransaction] {
+        // Compras no cartão fora da listagem: só aparecem no detalhe da fatura.
         TransactionEngine.filter(
             store.transactions, year: year, month: month,
             type: typeFilter, status: statusFilter,
             categoryID: categoryID,
-            search: search.isEmpty ? nil : search
+            search: search.isEmpty ? nil : search,
+            includeCardPurchases: false
         )
     }
 
@@ -313,6 +419,9 @@ public struct TransactionListView: View {
         var parts: [String] = []
         if let cat = store.category(id: t.categoryID) {
             parts.append(cat.name)
+        }
+        if let card = store.card(id: t.creditCardID) {
+            parts.append(card.name)
         }
         parts.append(shortDate(t.dueDate))
         if let n = t.currentInstallment, t.recurrence == .installment {
@@ -377,6 +486,8 @@ public struct TransactionFormView: View {
     @State private var recurrence: RecurrenceType
     @State private var installmentCount: Int
     @State private var interval: InstallmentInterval
+    @State private var payOnCard: Bool
+    @State private var cardID: String?
     @State private var showingScopeConfirm = false
     @State private var isQuickAdd = false
     @State private var errors: [String] = []
@@ -405,23 +516,58 @@ public struct TransactionFormView: View {
     }
     @FocusState private var focusedField: Field?
 
-    public init(editing: FinancialTransaction? = nil, year: Int, month: Int, draft: TransactionDraft? = nil) {
+    public init(
+        editing: FinancialTransaction? = nil, year: Int, month: Int,
+        draft: TransactionDraft? = nil, pendingPhoto: Data? = nil
+    ) {
         self.editing = editing
         self.year = year
         self.month = month
-        // Cadastro rápido (deep link/Siri): pré-preenche valor/descrição/data
-        // como conta a pagar única quitada; categoria o usuário escolhe.
+        // Cadastro rápido (deep link/Siri) ou IA (prompt/voz/foto):
+        // pré-preenche valor/descrição/data/tipo/categoria; quitado quando
+        // a data é hoje ou passada, pendente quando futura.
         _description = State(initialValue: editing?.description ?? draft?.description ?? "")
-        _type = State(initialValue: editing?.type ?? .payable)
+        _type = State(initialValue: editing?.type ?? draft?.type ?? .payable)
         _amount = State(initialValue: editing?.amount ?? draft?.amount ?? 0)
-        _categoryID = State(initialValue: editing?.categoryID)
+        _categoryID = State(initialValue: editing?.categoryID ?? draft?.categoryID)
         _dueDate = State(initialValue: editing?.dueDate ?? draft?.date ?? Date())
-        _status = State(initialValue: editing?.status == .paid ? .paid : (draft != nil ? .paid : .pending))
+        _status = State(initialValue: {
+            if let editing {
+                return editing.status == .paid ? .paid : .pending
+            }
+            if let date = draft?.date,
+               date > Calendar.current.startOfDay(for: Date())
+               && Calendar.current.startOfDay(for: date)
+                != Calendar.current.startOfDay(for: Date()) {
+                return .pending
+            }
+            return draft != nil ? .paid : .pending
+        }())
         _notes = State(initialValue: editing?.notes ?? "")
-        _recurrence = State(initialValue: editing?.recurrence ?? .unique)
-        _installmentCount = State(initialValue: max(editing?.installmentCount ?? 2, 2))
-        _interval = State(initialValue: editing?.installmentInterval ?? .monthly)
+        _recurrence = State(initialValue: {
+            if let editing { return editing.recurrence }
+            // "em 3x" manda em parcelada; senão usa a recorrência da IA.
+            if (draft?.installmentCount ?? 1) >= 2 { return .installment }
+            return draft?.recurrence ?? .unique
+        }())
+        _installmentCount = State(initialValue: max(
+            editing?.installmentCount ?? draft?.installmentCount ?? 2, 2))
+        _interval = State(initialValue:
+            editing?.installmentInterval ?? draft?.interval ?? .monthly)
+        _payOnCard = State(initialValue:
+            editing?.creditCardID != nil
+                || draft?.payOnCard == true
+                || draft?.creditCardID != nil)
+        _cardID = State(initialValue: editing?.creditCardID ?? draft?.creditCardID)
         _isQuickAdd = State(initialValue: editing == nil && draft != nil)
+        // Foto vinda do scan da IA: entra como pendente (anexa no create).
+        _pending = State(initialValue: {
+            guard editing == nil, let photo = pendingPhoto, !photo.isEmpty else { return [] }
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd-HHmmss"
+            return [PendingAttachment(
+                fileName: "recibo-\(f.string(from: Date())).jpg", data: photo)]
+        }())
     }
 
     private var editingIsSeries: Bool {
@@ -453,6 +599,38 @@ public struct TransactionFormView: View {
                             currencyCode: store.settings.currency.currencyCode,
                             localeIdentifier: store.settings.currency.localeIdentifier
                         )
+                    }
+                    if editing == nil, type == .payable {
+                        Section(store.t(.payMethod)) {
+                            Picker(store.t(.payMethod), selection: $payOnCard) {
+                                Text(store.t(.payCash)).tag(false)
+                                Text(store.t(.payCard)).tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            if payOnCard {
+                                if store.activeCards.isEmpty {
+                                    Text(store.t(.payNoCard))
+                                        .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                                } else {
+                                    Picker(store.t(.cardFilter), selection: $cardID) {
+                                        Text(store.t(.select)).tag(nil as String?)
+                                        ForEach(store.activeCards) { card in
+                                            Text(card.name).tag(card.id as String?)
+                                        }
+                                    }
+                                    if let card = store.card(id: cardID) {
+                                        let invoice = InvoiceService.invoiceFor(purchaseDate: dueDate, card: card)
+                                        Text(String(
+                                            format: store.t(.invoiceGoesTo),
+                                            Dates.monthLabel(
+                                                year: invoice.year, month: invoice.month,
+                                                localeIdentifier: store.lang.localeIdentifier)
+                                        ))
+                                            .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                                    }
+                                }
+                            }
+                        }
                     }
                     Section(store.t(.dataSection)) {
                         TextField(store.t(.descriptionField), text: $description)
@@ -862,6 +1040,9 @@ public struct TransactionFormView: View {
                 interval: recurrence == .installment ? interval : nil,
                 language: store.lang
             )
+            if type == .payable, payOnCard, store.card(id: cardID) == nil {
+                errors.append(store.t(.payNoCard))
+            }
         }
         guard errors.isEmpty else { return }
         // Conta fixa, recorrente ou parcelada em série: pergunta o alcance.
@@ -903,12 +1084,14 @@ public struct TransactionFormView: View {
             }
             store.updateTransaction(edit)
         } else {
+            let card = (type == .payable && payOnCard) ? store.card(id: cardID) : nil
             let input = TransactionEngine.CreateInput(
                 description: description, type: type, categoryID: categoryID,
                 amount: amountDecimal, recurrence: recurrence, dueDate: dueDate,
                 notes: notesValue,
                 totalInstallments: recurrence == .installment ? installmentCount : nil,
-                interval: recurrence == .installment || recurrence == .recurring ? interval : nil
+                interval: recurrence == .installment || recurrence == .recurring ? interval : nil,
+                creditCardID: card?.id, card: card
             )
             let items = store.create(input)
             // Pendentes (foto/arquivo escolhidos antes de salvar) vão para a

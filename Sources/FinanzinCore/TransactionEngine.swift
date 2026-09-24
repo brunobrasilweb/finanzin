@@ -18,13 +18,18 @@ public enum TransactionEngine {
         public var interval: InstallmentInterval?
         public var fundID: String?
         public var fundMovementType: FundMovementType?
+        /// Compra no cartão (`nil` = à vista/conta comum). Quando presente,
+        /// `card` (fechamento/vencimento) define o `dueDate` pela fatura.
+        public var creditCardID: String?
+        public var card: CreditCard?
 
         public init(
             description: String, type: TransactionType, categoryID: String? = nil,
             amount: Decimal, recurrence: RecurrenceType = .unique, dueDate: Date = Date(),
             notes: String? = nil, totalInstallments: Int? = nil,
             interval: InstallmentInterval? = nil, fundID: String? = nil,
-            fundMovementType: FundMovementType? = nil
+            fundMovementType: FundMovementType? = nil,
+            creditCardID: String? = nil, card: CreditCard? = nil
         ) {
             self.description = description
             self.type = type
@@ -37,13 +42,18 @@ public enum TransactionEngine {
             self.interval = interval
             self.fundID = fundID
             self.fundMovementType = fundMovementType
+            self.creditCardID = creditCardID
+            self.card = card
         }
     }
 
     /// Cria a transação raiz + filhas (parcelas ou recorrências futuras).
     /// Retorna todas para o `Store` persistir de uma vez.
+    /// Compra no cartão: o `dueDate` vira o vencimento da fatura
+    /// (mesma ou próxima, via `InvoiceService`).
     public static func expand(_ input: CreateInput) -> [FinancialTransaction] {
         let trimmed = input.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rootDue = invoiceDueDate(purchaseDate: input.dueDate, input: input)
         let root = FinancialTransaction(
             description: trimmed,
             type: input.type,
@@ -54,10 +64,11 @@ public enum TransactionEngine {
             installmentCount: input.totalInstallments ?? 1,
             currentInstallment: input.recurrence == .installment ? 1 : nil,
             installmentInterval: input.interval,
-            dueDate: input.dueDate,
+            dueDate: rootDue,
             notes: input.notes,
             fundID: input.fundID,
-            fundMovementType: input.fundMovementType
+            fundMovementType: input.fundMovementType,
+            creditCardID: input.creditCardID
         )
 
         switch input.recurrence {
@@ -70,11 +81,24 @@ public enum TransactionEngine {
         }
     }
 
+    /// `dueDate` efetivo: vencimento da fatura quando há cartão, senão a data informada.
+    private static func invoiceDueDate(purchaseDate: Date, input: CreateInput) -> Date {
+        guard input.creditCardID != nil, let card = input.card else { return purchaseDate }
+        return InvoiceService.invoiceFor(purchaseDate: purchaseDate, card: card).dueDate
+    }
+
     private static func expandInstallments(root: FinancialTransaction, input: CreateInput) -> [FinancialTransaction] {
         let count = max(input.totalInstallments ?? 1, 1)
         guard count > 1, let interval = input.interval else { return [root] }
         let amounts = Currency.split(input.amount, into: count)
-        let dates = Dates.installmentDates(from: input.dueDate, count: count, interval: interval)
+        let dates: [Date]
+        if input.creditCardID != nil, let card = input.card {
+            // Parcelado no cartão: uma parcela por fatura futura
+            // (1ª pela regra de fechamento, demais mês a mês).
+            dates = InvoiceService.invoiceDueDates(purchaseDate: input.dueDate, card: card, count: count)
+        } else {
+            dates = Dates.installmentDates(from: input.dueDate, count: count, interval: interval)
+        }
         var out: [FinancialTransaction] = []
         for i in 0 ..< count {
             if i == 0 {
@@ -97,7 +121,8 @@ public enum TransactionEngine {
                     notes: root.notes,
                     parentID: root.id,
                     fundID: root.fundID,
-                    fundMovementType: root.fundMovementType
+                    fundMovementType: root.fundMovementType,
+                    creditCardID: root.creditCardID
                 ))
             }
         }
@@ -108,6 +133,7 @@ public enum TransactionEngine {
         let interval: InstallmentInterval = input.recurrence == .fixed ? .monthly : (input.interval ?? .monthly)
         var out: [FinancialTransaction] = []
         for i in 1 ... recurringHorizonMonths {
+            let purchaseDate = Dates.addPeriod(input.dueDate, interval: interval, steps: i)
             out.append(FinancialTransaction(
                 description: root.description,
                 type: root.type,
@@ -117,11 +143,12 @@ public enum TransactionEngine {
                 amount: input.amount,
                 installmentCount: 1,
                 installmentInterval: interval,
-                dueDate: Dates.addPeriod(input.dueDate, interval: interval, steps: i),
+                dueDate: invoiceDueDate(purchaseDate: purchaseDate, input: input),
                 notes: root.notes,
                 parentID: root.id,
                 fundID: root.fundID,
-                fundMovementType: root.fundMovementType
+                fundMovementType: root.fundMovementType,
+                creditCardID: root.creditCardID
             ))
         }
         return out
@@ -181,13 +208,19 @@ public enum TransactionEngine {
         type: TransactionType? = nil,
         status: TransactionStatus? = nil,
         categoryID: String? = nil,
-        search: String? = nil
+        search: String? = nil,
+        creditCardID: String? = nil,
+        includeCardPurchases: Bool = true
     ) -> [FinancialTransaction] {
         all.filter { t in
             guard Dates.isInMonth(t.dueDate, year: year, month: month) else { return false }
             if let type, t.type != type { return false }
             if let status, t.status != status { return false }
             if let categoryID, t.categoryID != categoryID { return false }
+            if let creditCardID, t.creditCardID != creditCardID { return false }
+            // A listagem geral não mostra compras no cartão: elas vivem
+            // dentro da fatura (detalhe "Fatura do {cartão}").
+            if !includeCardPurchases, t.creditCardID != nil { return false }
             if let q = search?.lowercased(), !q.isEmpty {
                 let hay = (t.description + " " + (t.notes ?? "")).lowercased()
                 guard hay.contains(q) else { return false }

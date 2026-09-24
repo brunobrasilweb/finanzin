@@ -33,6 +33,10 @@
 	<string>Tire foto do recibo para ler os dados e anexar como comprovante.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Escolha a foto do recibo para ler os dados e anexar como comprovante.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Grave a descrição do gasto para transcrever no próprio iPhone.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcrever sua voz em texto para preencher valor e descrição, de preferência offline.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

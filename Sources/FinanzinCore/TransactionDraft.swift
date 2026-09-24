@@ -12,11 +12,38 @@ public struct TransactionDraft: Hashable, Sendable {
     public var amount: Decimal?
     public var description: String?
     public var date: Date?
+    /// Tipo sugerido pela IA local (prompt/voz). Deep link/Siri não enviam.
+    public var type: TransactionType?
+    /// Categoria sugerida pela IA local (id do Store).
+    public var categoryID: String?
+    /// Parcelas detectadas no prompt ("em 3x"). Nil = conta única.
+    public var installmentCount: Int?
+    /// Recorrência detectada ("todo mês"). Nil = avulsa.
+    public var recurrence: RecurrenceType?
+    /// Intervalo da recorrente (nil quando avulsa/fixa/parcelada).
+    public var interval: InstallmentInterval?
+    /// Cartão citado ou único ativo ("cartão nubank", "no cartão").
+    public var creditCardID: String?
+    /// Menção genérica ao cartão sem identificar qual (o form pede).
+    public var payOnCard: Bool
 
-    public init(amount: Decimal? = nil, description: String? = nil, date: Date? = nil) {
+    public init(
+        amount: Decimal? = nil, description: String? = nil, date: Date? = nil,
+        type: TransactionType? = nil, categoryID: String? = nil,
+        installmentCount: Int? = nil, recurrence: RecurrenceType? = nil,
+        interval: InstallmentInterval? = nil, creditCardID: String? = nil,
+        payOnCard: Bool = false
+    ) {
         self.amount = amount
         self.description = description
         self.date = date
+        self.type = type
+        self.categoryID = categoryID
+        self.installmentCount = installmentCount
+        self.recurrence = recurrence
+        self.interval = interval
+        self.creditCardID = creditCardID
+        self.payOnCard = payOnCard
     }
 
     // MARK: - Parse da URL

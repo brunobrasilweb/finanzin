@@ -106,6 +106,44 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case txReceive
     case txPay
     case txDueLine
+    // Pagamento e fatura (cartão de crédito)
+    case payMethod
+    case payCash
+    case payCard
+    case payNoCard
+    case invoiceGoesTo
+    case invoiceDueOn
+    case invoicePay
+    case invoicePayTitle
+    case invoicePayMessage
+    case invoicePaid
+    case invoiceOpen
+    case invoiceClosed
+    case invoiceSection
+    case invoiceOf
+    case invoiceEntries
+    case invoiceEmpty
+    case invoiceDelete
+    case invoiceDeleteMessage
+    case cardFilter
+    // Cartões
+    case cardTitle
+    case cardManage
+    case cardEmptyTitle
+    case cardEmptySubtitle
+    case cardNewTitle
+    case cardEditTitle
+    case cardNamePh
+    case cardClosingDay
+    case cardDueDay
+    case cardDayFootnote
+    case cardActive
+    case cardArchived
+    case cardArchive
+    case cardUnarchive
+    case cardErrDuplicate
+    case cardErrDay
+    case cardDeleteBlocked
     // Comprovantes (anexos)
     case txReceipts
     case txAttachFile
@@ -144,6 +182,7 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case dashChartExpense
     case dashOverBy
     case dashLeft
+    case dashInvoices
     // Orçamento
     case budEmptyTitle
     case budEmptySubtitle
@@ -233,6 +272,23 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case quickAddHint
     case quickAddValueLabel
     case quickAddDescLabel
+    // Registro com IA (prompt/voz/foto — tudo on-device, sem API)
+    case entryChoiceTitle
+    case entryManual
+    case entryAI
+    case aiTitle
+    case aiPromptPh
+    case aiListen
+    case aiStop
+    case aiListening
+    case aiHeardAs
+    case aiEmpty
+    case aiLowConfidence
+    case aiNoSpeech
+    case aiNoPermission
+    case aiUseData
+    case aiTranscribing
+    case aiEnhancing
 }
 
 public enum L10n {
@@ -348,6 +404,42 @@ public enum L10n {
         case .txReceive: "Receber"
         case .txPay: "Pagar"
         case .txDueLine: "Vencimento %@ • %@"
+        case .payMethod: "Pagamento"
+        case .payCash: "À vista"
+        case .payCard: "Cartão"
+        case .payNoCard: "Cadastre um cartão primeiro."
+        case .invoiceGoesTo: "Cai na fatura de %@"
+        case .invoiceDueOn: "Vence %@"
+        case .invoicePay: "Pagar fatura"
+        case .invoicePayTitle: "Pagar fatura"
+        case .invoicePayMessage: "Dar baixa em %d conta(s) no valor de %@?"
+        case .invoicePaid: "Paga"
+        case .invoiceOpen: "Aberta"
+        case .invoiceClosed: "Fechada"
+        case .invoiceSection: "Faturas"
+        case .invoiceOf: "Fatura do %@"
+        case .invoiceEntries: "Lançamentos"
+        case .invoiceEmpty: "Nenhum lançamento nesta fatura."
+        case .invoiceDelete: "Excluir fatura"
+        case .invoiceDeleteMessage: "Excluir %d lançamento(s) desta fatura? Não pode ser desfeita."
+        case .cardFilter: "Cartão"
+        case .cardTitle: "Cartões"
+        case .cardManage: "Cartões"
+        case .cardEmptyTitle: "Sem cartões"
+        case .cardEmptySubtitle: "Cadastre seu cartão com fechamento e vencimento para gerenciar as faturas."
+        case .cardNewTitle: "Novo cartão"
+        case .cardEditTitle: "Editar cartão"
+        case .cardNamePh: "Nome (ex.: Nubank)"
+        case .cardClosingDay: "Fechamento (dia)"
+        case .cardDueDay: "Vencimento (dia)"
+        case .cardDayFootnote: "De 1 a 31 — meses curtos ajustam sozinhos."
+        case .cardActive: "Ativo"
+        case .cardArchived: "Arquivado"
+        case .cardArchive: "Arquivar"
+        case .cardUnarchive: "Reativar"
+        case .cardErrDuplicate: "Já existe um cartão com esse nome."
+        case .cardErrDay: "Fechamento e vencimento devem ser entre 1 e 31."
+        case .cardDeleteBlocked: "“%@” tem lançamentos e não pode ser excluído (arquive para esconder do form)."
         case .txReceipts: "Comprovantes"
         case .txAttachFile: "Anexar arquivo"
         case .txTakePhoto: "Tirar foto"
@@ -386,6 +478,7 @@ public enum L10n {
         case .dashChartExpense: "Despesas"
         case .dashOverBy: "Estourou %@"
         case .dashLeft: "Restam %@"
+        case .dashInvoices: "Faturas"
         // Orçamento
         case .budEmptyTitle: "Sem orçamentos"
         // 
@@ -480,6 +573,22 @@ public enum L10n {
         case .quickAddHint: "Vindo do atalho — confira e salve."
         case .quickAddValueLabel: "Valor"
         case .quickAddDescLabel: "O quê?"
+        case .entryChoiceTitle: "Como registrar?"
+        case .entryManual: "Cadastro manual"
+        case .entryAI: "Registro com IA"
+        case .aiTitle: "Registro com IA"
+        case .aiPromptPh: "Ex.: paguei 45 na padaria ontem"
+        case .aiListen: "Ditar"
+        case .aiStop: "Parar"
+        case .aiListening: "Ouvindo… toque em Parar ao terminar."
+        case .aiHeardAs: "Entendi"
+        case .aiEmpty: "Descreva o gasto por texto ou voz — ex.: paguei 45 na padaria ontem."
+        case .aiLowConfidence: "Entendimento parcial — confira os campos antes de usar."
+        case .aiNoSpeech: "Não entendi o áudio. Tente de novo ou digite."
+        case .aiNoPermission: "Permita o microfone e o reconhecimento de fala em Ajustes para ditar."
+        case .aiUseData: "Usar estes dados"
+        case .aiTranscribing: "Transcrevendo…"
+        case .aiEnhancing: "Interpretando com IA…"
         }
     }
 
@@ -583,6 +692,42 @@ public enum L10n {
         case .txReceive: "Receive"
         case .txPay: "Pay"
         case .txDueLine: "Due %@ • %@"
+        case .payMethod: "Payment"
+        case .payCash: "Cash"
+        case .payCard: "Card"
+        case .payNoCard: "Add a card first."
+        case .invoiceGoesTo: "Goes to the %@ bill"
+        case .invoiceDueOn: "Due %@"
+        case .invoicePay: "Pay bill"
+        case .invoicePayTitle: "Pay bill"
+        case .invoicePayMessage: "Settle %d bill(s) totaling %@?"
+        case .invoicePaid: "Paid"
+        case .invoiceOpen: "Open"
+        case .invoiceClosed: "Closed"
+        case .invoiceSection: "Bills"
+        case .invoiceOf: "%@ bill"
+        case .invoiceEntries: "Entries"
+        case .invoiceEmpty: "No entries in this bill."
+        case .invoiceDelete: "Delete bill"
+        case .invoiceDeleteMessage: "Delete %d entrie(s) from this bill? This cannot be undone."
+        case .cardFilter: "Card"
+        case .cardTitle: "Cards"
+        case .cardManage: "Cards"
+        case .cardEmptyTitle: "No cards"
+        case .cardEmptySubtitle: "Add your card with closing and due days to manage bills."
+        case .cardNewTitle: "New card"
+        case .cardEditTitle: "Edit card"
+        case .cardNamePh: "Name (e.g. Nubank)"
+        case .cardClosingDay: "Closing (day)"
+        case .cardDueDay: "Due (day)"
+        case .cardDayFootnote: "1 to 31 — short months adjust automatically."
+        case .cardActive: "Active"
+        case .cardArchived: "Archived"
+        case .cardArchive: "Archive"
+        case .cardUnarchive: "Unarchive"
+        case .cardErrDuplicate: "A card with this name already exists."
+        case .cardErrDay: "Closing and due days must be between 1 and 31."
+        case .cardDeleteBlocked: "“%@” has transactions and cannot be deleted (archive it to hide from the form)."
         case .txReceipts: "Receipts"
         case .txAttachFile: "Attach file"
         case .txTakePhoto: "Take photo"
@@ -619,6 +764,7 @@ public enum L10n {
         case .dashChartExpense: "Expenses"
         case .dashOverBy: "Over by %@"
         case .dashLeft: "%@ left"
+        case .dashInvoices: "Bills"
         case .budEmptyTitle: "No budgets"
         case .budEmptySubtitle: "Set a monthly limit per category to track."
         case .budByCategory: "By category"
@@ -705,6 +851,22 @@ public enum L10n {
         case .quickAddHint: "From the shortcut — review and save."
         case .quickAddValueLabel: "Amount"
         case .quickAddDescLabel: "What?"
+        case .entryChoiceTitle: "How to log it?"
+        case .entryManual: "Manual entry"
+        case .entryAI: "Smart entry"
+        case .aiTitle: "Smart entry"
+        case .aiPromptPh: "E.g.: paid 45 at the bakery yesterday"
+        case .aiListen: "Dictate"
+        case .aiStop: "Stop"
+        case .aiListening: "Listening… tap Stop when done."
+        case .aiHeardAs: "Understood"
+        case .aiEmpty: "Describe the expense by text or voice — e.g.: paid 45 at the bakery yesterday."
+        case .aiLowConfidence: "Partial understanding — double-check the fields before using."
+        case .aiNoSpeech: "Could not understand the audio. Try again or type."
+        case .aiNoPermission: "Allow microphone and speech recognition in Settings to dictate."
+        case .aiUseData: "Use these details"
+        case .aiTranscribing: "Transcribing…"
+        case .aiEnhancing: "Interpreting with AI…"
         }
     }
 }

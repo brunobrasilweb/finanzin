@@ -6,6 +6,7 @@ import Foundation
 public final class Store: ObservableObject {
     @Published public var categories: [FinanceCategory] = []
     @Published public var transactions: [FinancialTransaction] = []
+    @Published public var creditCards: [CreditCard] = []
     @Published public var funds: [Fund] = []
     @Published public var budgets: [BudgetLimit] = []
     @Published public var wishlists: [Wishlist] = []
@@ -79,6 +80,7 @@ public final class Store: ObservableObject {
     /// Preferências (`settings`, `valuesHidden`) são preservadas.
     public func resetToDefaults() {
         transactions = []
+        creditCards = []
         funds = []
         budgets = []
         wishlists = []
@@ -194,7 +196,15 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func create(_ input: TransactionEngine.CreateInput) -> [FinancialTransaction] {
-        let items = TransactionEngine.expand(input)
+        // Resolve o cartão quando só o ID veio (o motor precisa dos dias
+        // de fechamento/vencimento para calcular a fatura).
+        var resolved = input
+        if resolved.creditCardID != nil, resolved.card == nil,
+           let id = resolved.creditCardID
+        {
+            resolved.card = creditCards.first { $0.id == id }
+        }
+        let items = TransactionEngine.expand(resolved)
         transactions.append(contentsOf: items)
         save()
         return items
@@ -300,6 +310,105 @@ public final class Store: ObservableObject {
 
     public func deleteSeries(targetID: String, scope: EditScope) {
         deleteTransactions(ids: resolveScope(targetID: targetID, scope: scope))
+    }
+
+    // MARK: - Cartões de crédito (Sprint 8: faturas)
+
+    public enum CardError: Error, Equatable {
+        case emptyName
+        case duplicateName
+        case invalidDay
+        case hasTransactions
+    }
+
+    @discardableResult
+    public func addCard(name: String, closingDay: Int, dueDay: Int) throws -> CreditCard {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw CardError.emptyName }
+        guard (1 ... 31).contains(closingDay), (1 ... 31).contains(dueDay) else {
+            throw CardError.invalidDay
+        }
+        let dup = creditCards.contains {
+            $0.name.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }
+        guard !dup else { throw CardError.duplicateName }
+        let card = CreditCard(name: trimmed, closingDay: closingDay, dueDay: dueDay)
+        creditCards.append(card)
+        save()
+        return card
+    }
+
+    public func updateCard(_ card: CreditCard) throws {
+        let trimmed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw CardError.emptyName }
+        guard (1 ... 31).contains(card.closingDay), (1 ... 31).contains(card.dueDay) else {
+            throw CardError.invalidDay
+        }
+        let dup = creditCards.contains {
+            $0.id != card.id && $0.name.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }
+        guard !dup else { throw CardError.duplicateName }
+        guard let i = creditCards.firstIndex(where: { $0.id == card.id }) else { return }
+        var copy = card
+        copy.name = trimmed
+        creditCards[i] = copy
+        save()
+    }
+
+    public func setCardActive(id: String, active: Bool) {
+        guard let i = creditCards.firstIndex(where: { $0.id == id }) else { return }
+        creditCards[i].isActive = active
+        save()
+    }
+
+    /// Exclusão bloqueada quando há lançamentos vinculados (preserva histórico).
+    /// Prefira arquivar (`setCardActive`) para manter o histórico e sumir do form.
+    public func deleteCard(id: String) throws {
+        guard transactions.allSatisfy({ $0.creditCardID != id }) else {
+            throw CardError.hasTransactions
+        }
+        creditCards.removeAll { $0.id == id }
+        save()
+    }
+
+    public func card(id: String?) -> CreditCard? {
+        guard let id else { return nil }
+        return creditCards.first { $0.id == id }
+    }
+
+    /// Cartões ativos (usados no form de lançamento).
+    public var activeCards: [CreditCard] {
+        creditCards.filter(\.isActive).sorted {
+            $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending
+        }
+    }
+
+    // MARK: - Faturas
+
+    /// Lançamentos da fatura (cartão + competência do vencimento).
+    public func invoiceTransactions(cardID: String, year: Int, month: Int) -> [FinancialTransaction] {
+        InvoiceService.transactions(transactions, cardID: cardID, year: year, month: month)
+    }
+
+    public func invoiceTotal(cardID: String, year: Int, month: Int) -> Decimal {
+        InvoiceService.total(invoiceTransactions(cardID: cardID, year: year, month: month))
+    }
+
+    /// Paga a fatura inteira de uma vez (baixa única): marca como `paid`
+    /// todas as pendentes do cartão na competência, com a mesma data.
+    /// Retorna a quantidade baixada.
+    @discardableResult
+    public func payInvoice(cardID: String, year: Int, month: Int, paidDate: Date) -> Int {
+        let ids = Set(InvoiceService.pendingIDs(
+            invoiceTransactions(cardID: cardID, year: year, month: month)))
+        guard !ids.isEmpty else { return 0 }
+        var count = 0
+        for i in transactions.indices where ids.contains(transactions[i].id) {
+            transactions[i] = TransactionEngine.settling(transactions[i], amount: transactions[i].amount, paidDate: paidDate)
+            count += 1
+        }
+        save()
+        return count
     }
 
     // MARK: - Fundos (Sprint 3)
@@ -622,25 +731,28 @@ public final class Store: ObservableObject {
     private struct Snapshot: Codable {
         var categories: [FinanceCategory]
         var transactions: [FinancialTransaction]
+        var creditCards: [CreditCard]
         var funds: [Fund]
         var budgets: [BudgetLimit]
         var wishlists: [Wishlist]
         var wishlistItems: [WishlistItem]
         var attachments: [TransactionAttachment]
 
-        // Compat: JSON antigo não tem a chave `attachments`.
+        // Compat: JSON antigo não tem `attachments` nem `creditCards`.
         private enum Keys: String, CodingKey {
-            case categories, transactions, funds, budgets
+            case categories, transactions, creditCards, funds, budgets
             case wishlists, wishlistItems, attachments
         }
 
         init(
             categories: [FinanceCategory], transactions: [FinancialTransaction],
-            funds: [Fund], budgets: [BudgetLimit], wishlists: [Wishlist],
-            wishlistItems: [WishlistItem], attachments: [TransactionAttachment]
+            creditCards: [CreditCard], funds: [Fund], budgets: [BudgetLimit],
+            wishlists: [Wishlist], wishlistItems: [WishlistItem],
+            attachments: [TransactionAttachment]
         ) {
             self.categories = categories
             self.transactions = transactions
+            self.creditCards = creditCards
             self.funds = funds
             self.budgets = budgets
             self.wishlists = wishlists
@@ -652,6 +764,7 @@ public final class Store: ObservableObject {
             let c = try decoder.container(keyedBy: Keys.self)
             categories = try c.decode([FinanceCategory].self, forKey: .categories)
             transactions = try c.decode([FinancialTransaction].self, forKey: .transactions)
+            creditCards = try c.decodeIfPresent([CreditCard].self, forKey: .creditCards) ?? []
             funds = try c.decode([Fund].self, forKey: .funds)
             budgets = try c.decode([BudgetLimit].self, forKey: .budgets)
             wishlists = try c.decode([Wishlist].self, forKey: .wishlists)
@@ -664,7 +777,8 @@ public final class Store: ObservableObject {
     public func save() {
         guard let url = fileURL else { return }
         let snap = Snapshot(
-            categories: categories, transactions: transactions, funds: funds,
+            categories: categories, transactions: transactions,
+            creditCards: creditCards, funds: funds,
             budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
             attachments: attachments
         )
@@ -682,6 +796,7 @@ public final class Store: ObservableObject {
             let snap = try JSONDecoder().decode(Snapshot.self, from: data)
             categories = snap.categories
             transactions = snap.transactions
+            creditCards = snap.creditCards
             funds = snap.funds
             budgets = snap.budgets
             wishlists = snap.wishlists

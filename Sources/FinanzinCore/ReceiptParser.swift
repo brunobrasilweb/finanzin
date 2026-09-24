@@ -36,6 +36,15 @@ public struct ReceiptScanResult: Hashable, Sendable {
 }
 
 public enum ReceiptParser {
+    // MARK: - Normalização
+
+    /// Maiúsculas sem acento para comparar chaves e nomes
+    /// ("saúde" == "SAUDE", "assai" == "ASSAÍ").
+    public static func fold(_ s: String) -> String {
+        s.folding(options: .diacriticInsensitive, locale: Locale(identifier: "pt_BR"))
+            .uppercased()
+    }
+
     // MARK: - Entrada principal
 
     /// Interpreta as linhas do OCR (ordem de leitura, topo → base).
@@ -200,35 +209,74 @@ public enum ReceiptParser {
         "CARREFOUR", "PAO DE ACUCAR", "PÃO DE AÇÚCAR", "EXTRA",
         "HIPERMERCADO", "MERCEARIA", "PADARIA", "PANIFICADORA",
         "ACOUGUE", "AÇOUGUE", "HORTIFRUTI", "SACOLAO", "SACOLÃO",
+        "FEIRA", "VAREJAO", "VAREJÃO", "EMPORIO", "EMPÓRIO",
+        "MARKET", "GROCERY", "SUPERMARKET", "BAKERY", "BUTCHER",
+        "GREENGROCER", "DELI",
     ]
     private static let moradiaWords: [String] = [
         "ALUGUEL", "IMOBILIARIA", "IMOBILIÁRIA", "CONDOMINIO",
         "CONDOMÍNIO", "ENEL", "ELETROPAULO", "SABESP", "COPEL",
         "ENERGIA ELETRICA", "ENERGIA ELÉTRICA", "INTERNET",
         " CLARO", " VIVO", " TIM ", "NET ",
+        "LUZ", "AGUA", "ÁGUA", "ESGOTO", "GAS", "GÁS",
+        "BOTIJAO", "BOTIJÃO", "IPTU", "LAVANDERIA", "DIARISTA",
+        "FAXINA", "ELETRICISTA", "ENCANADOR", "PEDREIRO", "REFORMA",
+        "RENT", "HOME", "HOUSE", "APARTMENT", "UTILITY", "UTILITIES",
+        "ELECTRICITY", "ELECTRIC", "WATER", "PHONE", "MORTGAGE",
+        "CONDO",
     ]
     private static let transporteWords: [String] = [
         "POSTO", "COMBUSTIVEL", "COMBUSTÍVEL", "GASOLINA", "ETANOL",
         "ALCOOL", "ÁLCOOL", "DIESEL", "SHELL", "IPIRANGA",
         "PETROBRAS", "UBER", " 99 ", "TAXI", "TÁXI", "CABIFY",
         "ESTACIONAMENTO", "PEDAGIO", "PEDÁGIO", "OFICINA",
-        "MECANICA", "MECÂNICA", "PNEU",
+        "MECANICA", "MECÂNICA", "PNEU", "ONIBUS", "ÔNIBUS",
+        "METRO", "METRÔ", "TREM", "GNV", "LAVAGEM", "LAVA JATO",
+        "OLEO", "ÓLEO", "REVISAO", "REVISÃO", "MULTA", "DETRAN",
+        "IPVA", "LICENCIAMENTO", "CNH", "MOTO",
+        "FUEL", "TRANSIT", "SUBWAY", "BUS", "TRAIN", "PARKING",
+        "TOLL", "LYFT", "CAR WASH", "OIL CHANGE", "DMV",
     ]
     private static let saudeWords: [String] = [
         "FARMACIA", "FARMÁCIA", "DROGARIA", "DROGASIL",
         "PAGUE MENOS", "HOSPITAL", "CLINICA", "CLÍNICA", "ODONTO",
         "LABORATORIO", "LABORATÓRIO", "PLANO DE SAUDE",
-        "PLANO DE SAÚDE",
+        "PLANO DE SAÚDE", "MEDICO", "MÉDICO", "DENTISTA",
+        "EXAME", "CONSULTA", "REMEDIO", "REMÉDIO", "ACADEMIA",
+        "CROSSFIT", "NATACAO", "NATAÇÃO", "PILATES", "MUSCULACAO",
+        "MUSCULAÇÃO", "YOGA", "SALAO", "SALÃO", "BARBEARIA",
+        "CABELO", "CABELEIREIRO", "MANICURE", "PEDICURE",
+        "ESTETICA", "ESTÉTICA", "MASSAGEM", "FISIOTERAPIA",
+        "PSICOLOGO", "PSICÓLOGO", "TERAPIA", "OCULOS", "ÓCULOS",
+        "OTICA", "ÓTICA",
+        "PHARMACY", "DRUGSTORE", "DOCTOR", "CLINIC", "DENTIST",
+        "GYM", "FITNESS", "THERAPY",
     ]
     private static let lazerWords: [String] = [
         "RESTAURANTE", "LANCHONETE", " BAR ", "PIZZARIA",
         "HAMBURGUERIA", "CAFETERIA", "CAFE", "CAFÉ", "CINEMA",
         "TEATRO", "SHOW", "PARQUE", "HOTEL", "POUSADA", "VIAGEM",
         "AEREA", "AÉREA", " GOL ", "LATAM", " AZUL ",
+        "IFOOD", "RAPPI", "DELIVERY", "LANCHE", "PIZZA",
+        "HAMBURGUER", "SUSHI", "ACAI", "AÇAÍ", "SORVETE",
+        "CHURRASCO", "MARMITA", "CERVEJA", "CHOPP", "ADEGA",
+        "BALADA", "SHOPPING", "NETFLIX", "SPOTIFY", "DISNEY",
+        "PRIME VIDEO", "HBO", "YOUTUBE", "DEEZER", "STREAMING",
+        "JOGO", "GAME", "STEAM", "PLAYSTATION", "XBOX", "NINTENDO",
+        "PRESENTE", "ROUPA", "CALCADO", "CALÇADO", "SAPATO",
+        "VESTUARIO", "VESTUÁRIO", "FESTA", "ANIVERSARIO",
+        "ANIVERSÁRIO", "MUSEU", "PASSAGEM", "AIRBNB",
+        "RESTAURANT", "FOOD", "FAST FOOD", "DINER", "PUB",
+        "MOVIE", "THEATER", "CONCERT", "TRAVEL", "TRIP", "FLIGHT",
+        "HOSTEL", "COFFEE", "ICE CREAM", "BURGER", "CLOTHES",
+        "SHOES", "GIFT",
     ]
     private static let educacaoWords: [String] = [
         "ESCOLA", "CURSO", "FACULDADE", "UNIVERSIDADE",
-        "LIVRARIA", "PAPELARIA",
+        "LIVRARIA", "PAPELARIA", "AULA", "CRECHE", "MENSALIDADE",
+        "VESTIBULAR", "CONCURSO",
+        "SCHOOL", "COURSE", "COLLEGE", "UNIVERSITY", "BOOKSTORE",
+        "CLASS", "TUITION", "LESSON",
     ]
     private static let categoryKeywords: [(name: String, words: [String])] = [
         ("Mercado", mercadoWords),
@@ -239,24 +287,43 @@ public enum ReceiptParser {
         ("Educação", educacaoWords),
     ]
 
-    /// Sugere o `id` da categoria: match por palavra-chave no texto do
-    /// recibo, senão categoria de despesa cujo nome aparece no texto.
+    /// Sugere o `id` da categoria: match por palavra-chave no texto
+    /// (cupom ou prompt de voz), senão pelo nome da categoria de despesa.
+    /// Comparação sem acento; chaves curtas (GAS, BAR, 99) exigem fronteira
+    /// de palavra para não capturar "GASTEI"/"BARBEARIA".
     /// Só sugere despesa (recibo = conta a pagar).
     public static func suggestCategoryID(
         in categories: [FinanceCategory], scan: ReceiptScanResult
     ) -> String? {
-        let haystack = (scan.rawText + " " + (scan.merchantName ?? "")).uppercased()
+        let haystack = fold(" \(scan.rawText) \(scan.merchantName ?? "") ")
         let expenses = categories.filter { $0.type == .expense }
         for entry in categoryKeywords {
-            if entry.words.contains(where: { haystack.contains($0) }),
-               let match = expenses.first(where: { $0.name.uppercased() == entry.name.uppercased() })
-            {
+            let hit = entry.words.contains { keyword in
+                let fkw = fold(keyword).trimmingCharacters(in: .whitespaces)
+                guard !fkw.isEmpty else { return false }
+                // Curta: fronteira de palavra. Longa: substring (pega
+                // "SUPERMERCADO" via "MERCADO").
+                return fkw.count <= 3
+                    ? haystack.contains(" \(fkw) ")
+                    : haystack.contains(fkw)
+            }
+            if hit, let match = expenses.first(where: {
+                fold($0.name) == fold(entry.name)
+            }) {
                 return match.id
             }
         }
-        // Fallback: nome da categoria citado no recibo (ex. "Mercado Dia").
+        // Fallback 1: nome da categoria citado (ex. "Mercado Dia").
         for cat in expenses where !cat.name.trimmingCharacters(in: .whitespaces).isEmpty {
-            if haystack.contains(cat.name.uppercased()) { return cat.id }
+            if haystack.contains(fold(cat.name)) { return cat.id }
+        }
+        // Fallback 2: palavra do texto contida no nome (cobre categorias
+        // custom: "mercado" casa com "Supermercado Dia").
+        for word in haystack.split(separator: " ").map(String.init)
+        where word.count >= 4 {
+            if let match = expenses.first(where: {
+                fold($0.name).contains(word)
+            }) { return match.id }
         }
         return nil
     }
