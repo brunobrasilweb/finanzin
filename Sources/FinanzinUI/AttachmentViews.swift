@@ -392,20 +392,30 @@ public struct PhotoCaptureView: UIViewControllerRepresentable {
             // dispensa só o sheet da câmera.
             guard let image = info[.originalImage] as? UIImage else { return }
             // JPEG full-res fora da main (encode bloqueava o dismiss).
-            let onPick = onPick
+            // O callback muta `@State` dos call sites, então não pode ser
+            // `@Sendable`: a caixa afirma o uso só na main (onde ele é
+            // invocado abaixo), o que torna o `@unchecked` sound.
+            let callback = MainCallback(onPick)
             DispatchQueue.global(qos: .userInitiated).async {
                 guard let data = image.jpegData(compressionQuality: 0.85),
                       !data.isEmpty
                 else { return }
                 // Sem ":" (o ISO8601 tem, e dois-pontos dão problema em path).
                 let name = "foto-\(Dates.shortFileStamp()).jpg"
-                DispatchQueue.main.async { onPick(data, name) }
+                DispatchQueue.main.async { callback.call(data, name) }
             }
         }
 
         public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             onCancel()
         }
+    }
+
+    /// Callback de UI invocado somente na main queue.
+    private struct MainCallback: @unchecked Sendable {
+        let fn: (Data, String) -> Void
+        init(_ fn: @escaping (Data, String) -> Void) { self.fn = fn }
+        func call(_ data: Data, _ name: String) { fn(data, name) }
     }
 }
 #endif
