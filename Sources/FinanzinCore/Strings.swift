@@ -86,6 +86,8 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case txValueSection
     case txDueAndStatus
     case txDueDate
+    case txMoreOptions
+    case txLessOptions
     case txSeriesFootnote
     case txRecurrence
     case txInstallments
@@ -384,6 +386,8 @@ public enum L10n {
         case .txValueSection: "Valor"
         case .txDueAndStatus: "Vencimento e status"
         case .txDueDate: "Vencimento"
+        case .txMoreOptions: "Mais opções"
+        case .txLessOptions: "Menos opções"
         case .txSeriesFootnote: "Se o alcance incluir outras parcelas, cada uma mantém seu vencimento."
         case .txRecurrence: "Recorrência"
         case .txInstallments: "Parcelas: %d"
@@ -672,6 +676,8 @@ public enum L10n {
         case .txValueSection: "Amount"
         case .txDueAndStatus: "Due date & status"
         case .txDueDate: "Due date"
+        case .txMoreOptions: "More options"
+        case .txLessOptions: "Fewer options"
         case .txSeriesFootnote: "If the scope includes other installments, each keeps its due date."
         case .txRecurrence: "Recurrence"
         case .txInstallments: "Installments: %d"

@@ -525,6 +525,7 @@ public struct TransactionFormView: View {
     @State private var cardID: String?
     @State private var showingScopeConfirm = false
     @State private var isQuickAdd = false
+    @State private var showMore = false
     @State private var errors: [String] = []
     // Comprovantes: edição grava direto no Store; criação acumula em
     // `pending` e anexa na primeira parcela após o `create()`.
@@ -609,77 +610,50 @@ public struct TransactionFormView: View {
         editing.map { store.isSeriesMember($0) } ?? false
     }
 
+    /// Abre o "Mais opções" sozinho quando há conteúdo escondido
+    /// (edição em série, notas, recorrência ou comprovantes).
+    private var shouldExpandMore: Bool {
+        editingIsSeries
+            || !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || recurrence != .unique
+            || !displayItems.isEmpty
+    }
+
     public var body: some View {
         NavigationStack {
-            Form {
+            ScrollView {
+                VStack(spacing: FinSpacing.lg) {
                     if isQuickAdd {
-                        Section {
-                            Text(store.t(.quickAddHint))
-                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                        }
+                        Text(store.t(.quickAddHint))
+                            .font(.footnote)
+                            .foregroundStyle(VercelTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .finCard()
                     }
-                    Section(store.t(.txAccountType)) {
-                        Picker(store.t(.typeLabel), selection: $type) {
-                            Label(TransactionType.payable.label(language: store.lang), systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
-                            Label(TransactionType.receivable.label(language: store.lang), systemImage: "arrow.down.circle.fill").tag(TransactionType.receivable)
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: type) { categoryID = nil }
+                    Picker(store.t(.typeLabel), selection: $type) {
+                        Label(TransactionType.payable.label(language: store.lang), systemImage: "arrow.up.circle.fill").tag(TransactionType.payable)
+                        Label(TransactionType.receivable.label(language: store.lang), systemImage: "arrow.down.circle.fill").tag(TransactionType.receivable)
                     }
-                    Section(store.t(.txValueSection)) {
-                        ProminentCurrencyField(
-                            value: $amount,
-                            tint: type == .payable ? .red.opacity(0.9) : .green,
-                            showKeyboardToolbar: false,
-                            currencyCode: store.settings.currency.currencyCode,
-                            localeIdentifier: store.settings.currency.localeIdentifier
-                        )
-                    }
-                    if editing == nil, type == .payable {
-                        Section(store.t(.payMethod)) {
-                            Picker(store.t(.payMethod), selection: $payOnCard) {
-                                Text(store.t(.payCash)).tag(false)
-                                Text(store.t(.payCard)).tag(true)
-                            }
-                            .pickerStyle(.segmented)
-                            if payOnCard {
-                                if store.activeCards.isEmpty {
-                                    Text(store.t(.payNoCard))
-                                        .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                                } else {
-                                    Picker(store.t(.cardFilter), selection: $cardID) {
-                                        Text(store.t(.select)).tag(nil as String?)
-                                        ForEach(store.activeCards) { card in
-                                            Text(card.name).tag(card.id as String?)
-                                        }
-                                    }
-                                    if let card = store.card(id: cardID) {
-                                        let invoice = InvoiceService.invoiceFor(purchaseDate: dueDate, card: card)
-                                        Text(String(
-                                            format: store.t(.invoiceGoesTo),
-                                            Dates.monthLabel(
-                                                year: invoice.year, month: invoice.month,
-                                                localeIdentifier: store.lang.localeIdentifier)
-                                        ))
-                                            .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Section(store.t(.dataSection)) {
+                    .pickerStyle(.segmented)
+                    .onChange(of: type) { categoryID = nil }
+                    ProminentCurrencyField(
+                        value: $amount,
+                        tint: type == .payable ? .red.opacity(0.9) : .green,
+                        showKeyboardToolbar: false,
+                        currencyCode: store.settings.currency.currencyCode,
+                        localeIdentifier: store.settings.currency.localeIdentifier
+                    )
+                    VStack(spacing: FinSpacing.md) {
                         TextField(store.t(.descriptionField), text: $description)
                             .focused($focusedField, equals: .description)
-                            .submitLabel(.next)
-                            .onSubmit { focusedField = .notes }
-                        Picker(store.t(.categoryLabel), selection: $categoryID) {
-                            Text(store.t(.noCategory)).tag(nil as String?)
-                            ForEach(store.categories.filter { $0.type == (type == .payable ? .expense : .income) }) { cat in
-                                Text(cat.name).tag(cat.id as String?)
-                            }
-                        }
-                    }
-                    Section(store.t(.txDueAndStatus)) {
+                            .submitLabel(.done)
+                            .onSubmit { focusedField = nil }
+                            .padding(.horizontal, FinSpacing.md)
+                            .padding(.vertical, 10)
+                            .background(VercelTheme.inset)
+                            .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+                        categoryMenu
+                        Divider().overlay(VercelTheme.border)
                         FormDateField(
                             store.t(.txDueDate), date: $dueDate,
                             localeIdentifier: store.lang.localeIdentifier,
@@ -689,130 +663,71 @@ public struct TransactionFormView: View {
                             Text(TransactionStatus.pending.label(language: store.lang)).tag(TransactionStatus.pending)
                             Text(TransactionStatus.paid.label(language: store.lang)).tag(TransactionStatus.paid)
                         }
-                        TextField(store.t(.notesField), text: $notes)
-                            .focused($focusedField, equals: .notes)
-                            .submitLabel(.done)
-                            .onSubmit { focusedField = nil }
+                        .pickerStyle(.segmented)
                         if editingIsSeries {
                             Text(store.t(.txSeriesFootnote))
                                 .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    Section(store.t(.txReceipts)) {
-                        if displayItems.isEmpty {
-                            Text(store.t(.txAttachEmpty))
-                                .font(.footnote)
-                                .foregroundStyle(VercelTheme.textSecondary)
-                        } else {
-                            ForEach(displayItems) { item in
-                                AttachmentRow(
-                                    item: item,
-                                    hidden: store.valuesHidden,
-                                    localeIdentifier: store.lang.localeIdentifier,
-                                    onPreview: { openPreview(item) },
-                                    onDelete: { deleteDisplayItem(item) }
-                                )
+                    .finCard()
+                    VStack(spacing: FinSpacing.md) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) { showMore.toggle() }
+                        } label: {
+                            HStack {
+                                Image(systemName: "ellipsis.circle")
+                                    .foregroundStyle(VercelTheme.textSecondary)
+                                Text(showMore ? store.t(.txLessOptions) : store.t(.txMoreOptions))
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(VercelTheme.textPrimary)
+                                Spacer()
+                                Image(systemName: showMore ? "chevron.up" : "chevron.down")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(VercelTheme.textTertiary)
                             }
+                            .contentShape(Rectangle())
                         }
-                        #if os(iOS)
-                        Button {
-                            showingScanChoice = true
-                        } label: {
-                            Label(store.t(.txScanReceipt), systemImage: "doc.text.viewfinder")
-                        }
-                        Button {
-                            capturePurpose = .attach
-                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                showingCamera = true
-                            } else {
-                                showingLibrary = true
-                            }
-                        } label: {
-                            Label(store.t(.txTakePhoto), systemImage: "camera")
-                        }
-                        Button {
-                            capturePurpose = .attach
-                            showingLibrary = true
-                        } label: {
-                            Label(store.t(.txChoosePhoto), systemImage: "photo")
-                        }
-                        #endif
-                        Button {
-                            showingFileImporter = true
-                        } label: {
-                            Label(store.t(.txAttachFile), systemImage: "paperclip")
-                        }
-                        if editingIsSeries {
-                            Text(store.t(.txSeriesAttachNote))
-                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                        }
-                        if editing == nil, !pending.isEmpty {
-                            Text(store.t(.txSaveToAttach))
-                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                        }
-                        if let attachmentError {
-                            Text(attachmentError).foregroundStyle(.red)
+                        .buttonStyle(.plain)
+                        if showMore {
+                            Divider().overlay(VercelTheme.border)
+                            moreOptionsContent
                         }
                     }
-                    if editing == nil {
-                        Section(store.t(.txRecurrence)) {
-                            Picker(store.t(.typeLabel), selection: $recurrence) {
-                                Text(RecurrenceType.unique.label(language: store.lang)).tag(RecurrenceType.unique)
-                                Text(RecurrenceType.installment.label(language: store.lang)).tag(RecurrenceType.installment)
-                                Text(RecurrenceType.fixed.label(language: store.lang)).tag(RecurrenceType.fixed)
-                                Text(RecurrenceType.recurring.label(language: store.lang)).tag(RecurrenceType.recurring)
-                            }
-                            if recurrence == .installment {
-                                Stepper(
-                                    String(format: store.t(.txInstallments), installmentCount),
-                                    value: $installmentCount, in: 2 ... 48
-                                )
-                                Picker(store.t(.txInterval), selection: $interval) {
-                                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
-                                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
-                                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
-                                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
-                                }
-                            }
-                            if recurrence == .recurring {
-                                Picker(store.t(.txInterval), selection: $interval) {
-                                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
-                                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
-                                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
-                                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
-                                }
-                                Text(store.t(.txGenerates24))
-                                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                            }
-                            if recurrence == .fixed {
-                                Text(store.t(.txGenerates24Monthly))
-                                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                            }
-                        }
-                    }
-                    if editingIsSeries, let seriesTarget = editing {
-                        Section(store.t(.txSeriesAccount)) {
-                            Text(String(
-                                format: store.t(.txSeriesMessage),
-                                seriesTarget.recurrence.label(language: store.lang).lowercased(),
-                                store.seriesMembers(targetID: seriesTarget.id).count
-                            ))
-                                .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
-                        }
-                    }
+                    .finCard()
                     if !errors.isEmpty {
-                        Section {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(errors.enumerated()), id: \.offset) { _, e in
-                                Text(e).foregroundStyle(.red)
+                                Text(e).foregroundStyle(.red).font(.footnote)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .finCard()
                     }
                 }
-                .scrollContentBackground(.hidden)
-                .background(VercelTheme.card)
+                .padding(.horizontal, FinSpacing.lg)
+                .padding(.vertical, FinSpacing.md)
+            }
+            .finBackground()
                 #if os(iOS)
                 .scrollDismissesKeyboard(.interactively)
                 #endif
+            .safeAreaInset(edge: .bottom) {
+                Button { requestSave() } label: {
+                    Text(store.t(.save))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(VercelTheme.accent)
+                        .foregroundStyle(VercelTheme.bg)
+                        .clipShape(RoundedRectangle(cornerRadius: FinRadius.lg, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, FinSpacing.lg)
+                .padding(.vertical, FinSpacing.sm)
+                .background(VercelTheme.bg)
+            }
+            .onAppear { if shouldExpandMore { showMore = true } }
             .navigationTitle(editing == nil ? (isQuickAdd ? store.t(.quickAddTitle) : store.t(.txNewTitle)) : store.t(.txEditTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -820,9 +735,6 @@ public struct TransactionFormView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(store.t(.close)) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(store.t(.save)) { requestSave() }
                 }
                 #if os(iOS)
                 ToolbarItemGroup(placement: .keyboard) {
@@ -917,6 +829,227 @@ public struct TransactionFormView: View {
                 }
             }
             #endif
+        }
+    }
+
+    // MARK: - Mais opções (conteúdo colapsável)
+
+    private var categoryMenu: some View {
+        let cats = store.categories.filter { $0.type == (type == .payable ? .expense : .income) }
+        return Menu {
+            Button { categoryID = nil } label: {
+                if categoryID == nil {
+                    Label(store.t(.noCategory), systemImage: "checkmark")
+                } else {
+                    Text(store.t(.noCategory))
+                }
+            }
+            ForEach(cats) { cat in
+                Button { categoryID = cat.id } label: {
+                    if categoryID == cat.id {
+                        Label(cat.name, systemImage: "checkmark")
+                    } else {
+                        Text(cat.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: FinSpacing.sm) {
+                if let sel = cats.first(where: { $0.id == categoryID }) {
+                    Circle().fill(VercelTheme.hex(sel.color)).frame(width: 10, height: 10)
+                    Text(sel.name).foregroundStyle(VercelTheme.textPrimary)
+                } else {
+                    Image(systemName: "tag").foregroundStyle(VercelTheme.textTertiary)
+                    Text(store.t(.noCategory)).foregroundStyle(VercelTheme.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(VercelTheme.textTertiary)
+            }
+            .padding(.horizontal, FinSpacing.md)
+            .padding(.vertical, 10)
+            .background(VercelTheme.inset)
+            .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+        }
+    }
+
+    private var moreOptionsContent: some View {
+        VStack(alignment: .leading, spacing: FinSpacing.lg) {
+            if editing == nil, type == .payable {
+                paymentSection
+                Divider().overlay(VercelTheme.border)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(store.t(.notesField))
+                    .font(.caption.bold())
+                    .foregroundStyle(VercelTheme.textTertiary)
+                    .textCase(.uppercase)
+                TextField(store.t(.notesField), text: $notes)
+                    .focused($focusedField, equals: .notes)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
+                    .padding(.horizontal, FinSpacing.md)
+                    .padding(.vertical, 10)
+                    .background(VercelTheme.inset)
+                    .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+            }
+            if editing == nil {
+                Divider().overlay(VercelTheme.border)
+                recurrenceSection
+            }
+            Divider().overlay(VercelTheme.border)
+            attachmentsSection
+            if editingIsSeries, let seriesTarget = editing {
+                Divider().overlay(VercelTheme.border)
+                Text(String(
+                    format: store.t(.txSeriesMessage),
+                    seriesTarget.recurrence.label(language: store.lang).lowercased(),
+                    store.seriesMembers(targetID: seriesTarget.id).count
+                ))
+                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+            }
+        }
+    }
+
+    private var paymentSection: some View {
+        VStack(alignment: .leading, spacing: FinSpacing.sm) {
+            Text(store.t(.payMethod))
+                .font(.caption.bold())
+                .foregroundStyle(VercelTheme.textTertiary)
+                .textCase(.uppercase)
+            Picker(store.t(.payMethod), selection: $payOnCard) {
+                Text(store.t(.payCash)).tag(false)
+                Text(store.t(.payCard)).tag(true)
+            }
+            .pickerStyle(.segmented)
+            if payOnCard {
+                if store.activeCards.isEmpty {
+                    Text(store.t(.payNoCard))
+                        .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                } else {
+                    Picker(store.t(.cardFilter), selection: $cardID) {
+                        Text(store.t(.select)).tag(nil as String?)
+                        ForEach(store.activeCards) { card in
+                            Text(card.name).tag(card.id as String?)
+                        }
+                    }
+                    if let card = store.card(id: cardID) {
+                        let invoice = InvoiceService.invoiceFor(purchaseDate: dueDate, card: card)
+                        Text(String(
+                            format: store.t(.invoiceGoesTo),
+                            Dates.monthLabel(
+                                year: invoice.year, month: invoice.month,
+                                localeIdentifier: store.lang.localeIdentifier)
+                        ))
+                            .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var recurrenceSection: some View {
+        VStack(alignment: .leading, spacing: FinSpacing.sm) {
+            Text(store.t(.txRecurrence))
+                .font(.caption.bold())
+                .foregroundStyle(VercelTheme.textTertiary)
+                .textCase(.uppercase)
+            Picker(store.t(.typeLabel), selection: $recurrence) {
+                Text(RecurrenceType.unique.label(language: store.lang)).tag(RecurrenceType.unique)
+                Text(RecurrenceType.installment.label(language: store.lang)).tag(RecurrenceType.installment)
+                Text(RecurrenceType.fixed.label(language: store.lang)).tag(RecurrenceType.fixed)
+                Text(RecurrenceType.recurring.label(language: store.lang)).tag(RecurrenceType.recurring)
+            }
+            if recurrence == .installment {
+                Stepper(
+                    String(format: store.t(.txInstallments), installmentCount),
+                    value: $installmentCount, in: 2 ... 48
+                )
+                Picker(store.t(.txInterval), selection: $interval) {
+                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
+                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
+                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
+                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
+                }
+            }
+            if recurrence == .recurring {
+                Picker(store.t(.txInterval), selection: $interval) {
+                    Text(InstallmentInterval.weekly.label(language: store.lang)).tag(InstallmentInterval.weekly)
+                    Text(InstallmentInterval.biweekly.label(language: store.lang)).tag(InstallmentInterval.biweekly)
+                    Text(InstallmentInterval.monthly.label(language: store.lang)).tag(InstallmentInterval.monthly)
+                    Text(InstallmentInterval.yearly.label(language: store.lang)).tag(InstallmentInterval.yearly)
+                }
+                Text(store.t(.txGenerates24))
+                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+            }
+            if recurrence == .fixed {
+                Text(store.t(.txGenerates24Monthly))
+                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+            }
+        }
+    }
+
+    private var attachmentsSection: some View {
+        VStack(alignment: .leading, spacing: FinSpacing.sm) {
+            Text(store.t(.txReceipts))
+                .font(.caption.bold())
+                .foregroundStyle(VercelTheme.textTertiary)
+                .textCase(.uppercase)
+            if displayItems.isEmpty {
+                Text(store.t(.txAttachEmpty))
+                    .font(.footnote)
+                    .foregroundStyle(VercelTheme.textSecondary)
+            } else {
+                ForEach(displayItems) { item in
+                    AttachmentRow(
+                        item: item,
+                        hidden: store.valuesHidden,
+                        localeIdentifier: store.lang.localeIdentifier,
+                        onPreview: { openPreview(item) },
+                        onDelete: { deleteDisplayItem(item) }
+                    )
+                }
+            }
+            #if os(iOS)
+            Button {
+                showingScanChoice = true
+            } label: {
+                Label(store.t(.txScanReceipt), systemImage: "doc.text.viewfinder")
+            }
+            Button {
+                capturePurpose = .attach
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    showingCamera = true
+                } else {
+                    showingLibrary = true
+                }
+            } label: {
+                Label(store.t(.txTakePhoto), systemImage: "camera")
+            }
+            Button {
+                capturePurpose = .attach
+                showingLibrary = true
+            } label: {
+                Label(store.t(.txChoosePhoto), systemImage: "photo")
+            }
+            #endif
+            Button {
+                showingFileImporter = true
+            } label: {
+                Label(store.t(.txAttachFile), systemImage: "paperclip")
+            }
+            if editingIsSeries {
+                Text(store.t(.txSeriesAttachNote))
+                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+            }
+            if editing == nil, !pending.isEmpty {
+                Text(store.t(.txSaveToAttach))
+                    .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
+            }
+            if let attachmentError {
+                Text(attachmentError).foregroundStyle(.red).font(.footnote)
+            }
         }
     }
 
