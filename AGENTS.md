@@ -37,4 +37,4 @@ iOS device run (machine WITH Xcode 16+ only): `xcodegen generate && open Finanzi
 - `Store` privacy mode: `valuesHidden` (UserDefaults) + `maskedAmount()` — new money text must use `maskedAmount`/`AmountText(..., hidden:)`, never `Format.currency` directly.
 - UI rows: clean lists use `.finCleanRow()` + `.finCleanList()` (transparent + separator, e.g. Transações/Orçamento/Desejos); boxed cards use `.finRow()` + `.finList()`. Screens need `.finBackground()` + `.finHideNavBar()` (root) or `.finDetailChrome()` (detail) or the notch/tab bar flashes light.
 - Persistence differs: iPhone uses `Store.defaultFileURL()` (Application Support); macOS demo is memory-only, always fresh.
-- No CI / lint / formatter config. Verify with `swift build && swift run FinanzinCoreTests`. Commits here use `feat: ...` (conventional, lowercase).
+- No CI / lint / formatter config. Verify with `swift build && swift run FinanzinCoreTests`. Commits here use `feat: ...` (conventional, lowercase, **always in English** — never commit messages in Portuguese).

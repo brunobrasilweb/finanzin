@@ -23,13 +23,13 @@ public struct RegistrarGastoIntent: AppIntent {
     public var valor: Double?
 
     @Parameter(title: "O quê?", description: "Descrição curta (ex.: Padaria).")
-    public var descricao: String?
+    public var details: String?
 
     public init() {}
 
-    public init(valor: Double?, descricao: String?) {
+    public init(valor: Double?, details: String?) {
         self.valor = valor
-        self.descricao = descricao
+        self.details = details
     }
 
     public func perform() async throws -> some IntentResult {
@@ -37,7 +37,7 @@ public struct RegistrarGastoIntent: AppIntent {
             guard let valor else { return nil }
             return Decimal(valor)
         }()
-        let trimmed = descricao?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = details?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = TransactionDraft.url(
             amount: amount,
             description: trimmed?.isEmpty == true ? nil : trimmed,
@@ -60,6 +60,7 @@ public struct FinanzinShortcuts: AppShortcutsProvider {
             phrases: [
                 "Registrar gasto no \(.applicationName)",
                 "Lançar gasto no \(.applicationName)",
+                "Log expense in \(.applicationName)",
             ],
             shortTitle: "Registrar gasto",
             systemImageName: "plus.circle.fill"
