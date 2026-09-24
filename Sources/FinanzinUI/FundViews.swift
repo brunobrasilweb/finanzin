@@ -381,6 +381,7 @@ public struct FundMovementView: View {
     @State private var description: String = ""
     @State private var amount: Decimal = 0
     @State private var date: Date = Date()
+    @State private var accountID: String?
     @State private var errorMessage: String?
     @FocusState private var descriptionFocused: Bool
 
@@ -407,6 +408,7 @@ public struct FundMovementView: View {
                             localeIdentifier: store.lang.localeIdentifier,
                             okTitle: store.t(.ok)
                         )
+                        AccountPickerField(accountID: $accountID)
                         if movement == .withdrawal,
                            let bal = store.balance(of: fundID)
                         {
@@ -451,6 +453,9 @@ public struct FundMovementView: View {
                         ? String(format: store.t(.fundDefaultDeposit), fund.name)
                         : String(format: store.t(.fundDefaultWithdraw), fund.name)
                 }
+                if accountID == nil {
+                    accountID = store.selectedAccountID ?? store.activeAccounts.first?.id
+                }
             }
         }
     }
@@ -459,7 +464,8 @@ public struct FundMovementView: View {
         do {
             try store.addFundMovement(
                 fundID: fundID, movement: movement,
-                amount: amount, description: description, dueDate: date
+                amount: amount, description: description, dueDate: date,
+                accountID: accountID ?? store.selectedAccountID
             )
             dismiss()
         } catch Store.FundError.emptyName {

@@ -552,7 +552,8 @@ public struct AIRegistrationSheet: View {
             notes: nil,
             totalInstallments: recurrence == .installment ? parcelCount : nil,
             interval: interval,
-            creditCardID: card?.id, card: card
+            creditCardID: card?.id, card: card,
+            accountID: store.selectedAccountID
         )
         let items = store.create(input)
         if let first = items.first {

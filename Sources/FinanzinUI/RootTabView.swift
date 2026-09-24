@@ -15,6 +15,10 @@ public struct RootTabView: View {
     @State private var showBudgetForm = false
     @State private var showWishlistForm = false
     @State private var rescheduleWork: DispatchWorkItem?
+    /// Splash inicial: overlay com logo + nome animados enquanto o
+    /// dashboard monta por baixo. Dispensado após ~1.5s (tempo mínimo
+    /// de marca — o `Store` carrega sincronamente, quase instantâneo).
+    @State private var showSplash = true
 
     public init(store: Store? = nil) {
         // No app iOS, persiste em Application Support; demo/previews injetam Store() em memória.
@@ -72,6 +76,13 @@ public struct RootTabView: View {
             .padding(.bottom, 42)
             #endif
         }
+        .overlay {
+            if showSplash {
+                SplashView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+        }
         .preferredColorScheme(store.settings.theme.colorScheme)
         .tint(.primary)
         .finTabChrome()
@@ -106,7 +117,10 @@ public struct RootTabView: View {
             WishlistFormView()
                 .environmentObject(store)
         }
-        .onAppear { reschedule() }
+        .onAppear {
+            reschedule()
+            dismissSplash()
+        }
         .onOpenURL { url in openQuickAdd(url) }
         .onChange(of: store.transactions) { reschedule() }
         .onChange(of: store.settings) { reschedule() }
@@ -128,6 +142,17 @@ public struct RootTabView: View {
         }
         txDraft = draft
         showTxForm = true
+    }
+
+    /// Dispensa o splash após o tempo mínimo de marca (~1.5s). O
+    /// dashboard já montou por baixo, então o fade revela conteúdo pronto.
+    private func dismissSplash() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1500))
+            withAnimation(.easeOut(duration: 0.35)) {
+                showSplash = false
+            }
+        }
     }
 
     /// Reagenda as notificações com debounce: cada tecla/mutação em série

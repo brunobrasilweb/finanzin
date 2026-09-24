@@ -27,6 +27,8 @@ public struct BudgetListView: View {
                 }
                 MonthPicker(year: $year, month: $month, localeIdentifier: store.lang.localeIdentifier)
                     .padding(.horizontal, FinSpacing.lg)
+                AccountFilterBar()
+                    .padding(.horizontal, FinSpacing.lg)
                 if items.isEmpty {
                     EmptyStateView(
                         title: store.t(.budEmptyTitle),
@@ -105,7 +107,7 @@ public struct BudgetListView: View {
     }
 
     private var rows: [BudgetService.Row] {
-        BudgetService.rows(limits: store.budgets, transactions: store.transactions, year: year, month: month)
+        BudgetService.rows(limits: store.budgets, transactions: store.visibleTransactions, year: year, month: month)
             .sorted { $0.percent > $1.percent }
     }
 

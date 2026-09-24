@@ -7,6 +7,7 @@ public final class Store: ObservableObject {
     @Published public var categories: [FinanceCategory] = []
     @Published public var transactions: [FinancialTransaction] = []
     @Published public var creditCards: [CreditCard] = []
+    @Published public var accounts: [BankAccount] = []
     @Published public var funds: [Fund] = []
     @Published public var budgets: [BudgetLimit] = []
     @Published public var wishlists: [Wishlist] = []
@@ -23,6 +24,35 @@ public final class Store: ObservableObject {
 
     public func setValuesHidden(_ hidden: Bool) {
         valuesHidden = hidden
+    }
+
+    // MARK: - Filtro global de conta (multi-contas)
+
+    /// Conta selecionada no filtro global (`nil` = Todas as contas).
+    /// Persistida em UserDefaults, fora do Snapshot JSON (como `valuesHidden`).
+    /// Vale para Resumo, Transações e Orçamento de uma vez.
+    private static let selectedAccountKey = "finSelectedAccountID"
+    @Published public var selectedAccountID: String? = UserDefaults.standard.string(forKey: "finSelectedAccountID") {
+        didSet {
+            if let id = selectedAccountID {
+                UserDefaults.standard.set(id, forKey: Self.selectedAccountKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.selectedAccountKey)
+            }
+        }
+    }
+
+    public func setSelectedAccount(_ id: String?) {
+        selectedAccountID = id
+    }
+
+    /// Lançamentos visíveis pelo filtro global. Seleção para conta removida
+    /// cai para Todas (em vez de lista vazia).
+    public var visibleTransactions: [FinancialTransaction] {
+        guard let id = selectedAccountID,
+              accounts.contains(where: { $0.id == id })
+        else { return transactions }
+        return transactions.filter { $0.accountID == id }
     }
 
     // MARK: - Configurações (Sprint 7)
@@ -81,6 +111,8 @@ public final class Store: ObservableObject {
     public func resetToDefaults() {
         transactions = []
         creditCards = []
+        accounts = []
+        selectedAccountID = nil
         funds = []
         budgets = []
         wishlists = []
@@ -282,21 +314,23 @@ public final class Store: ObservableObject {
         public var description: String
         public var type: TransactionType?
         public var categoryID: String?
+        public var accountID: String?
         public var amount: Decimal
         public var notes: String?
         public var status: TransactionStatus?
 
-        public init(description: String, type: TransactionType? = nil, categoryID: String?, amount: Decimal, notes: String?, status: TransactionStatus? = nil) {
+        public init(description: String, type: TransactionType? = nil, categoryID: String?, accountID: String? = nil, amount: Decimal, notes: String?, status: TransactionStatus? = nil) {
             self.description = description
             self.type = type
             self.categoryID = categoryID
+            self.accountID = accountID
             self.amount = amount
             self.notes = notes
             self.status = status
         }
     }
 
-    /// Aplica edição ao escopo. Valor/descrição/tipo/categoria/obs vão para todas
+    /// Aplica edição ao escopo. Valor/descrição/tipo/categoria/conta/obs vão para todas
     /// do escopo; vencimento é preservado por parcela (cada uma mantém sua data).
     public func applySeriesEdit(targetID: String, scope: EditScope, edit: SeriesEdit) {
         let ids = Set(resolveScope(targetID: targetID, scope: scope))
@@ -304,6 +338,7 @@ public final class Store: ObservableObject {
             transactions[i].description = edit.description
             if let type = edit.type { transactions[i].type = type }
             transactions[i].categoryID = edit.categoryID
+            transactions[i].accountID = edit.accountID
             transactions[i].amount = edit.amount
             transactions[i].totalAmount = edit.amount
             transactions[i].notes = edit.notes
@@ -387,6 +422,107 @@ public final class Store: ObservableObject {
         creditCards.filter(\.isActive).sorted {
             $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending
         }
+    }
+
+    // MARK: - Contas bancárias (multi-contas)
+
+    public enum AccountError: Error, Equatable {
+        case emptyName
+        case duplicateName
+        case invalidAmount
+        case hasTransactions
+        /// O app nunca fica sem contas: nem excluir nem arquivar a última.
+        case lastAccount
+    }
+
+    @discardableResult
+    public func addAccount(name: String, initialBalance: Decimal, color: String, icon: String) throws -> BankAccount {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw AccountError.emptyName }
+        guard initialBalance >= 0 else { throw AccountError.invalidAmount }
+        let dup = accounts.contains {
+            $0.name.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }
+        guard !dup else { throw AccountError.duplicateName }
+        let account = BankAccount(name: trimmed, initialBalance: initialBalance, color: color, icon: icon)
+        accounts.append(account)
+        save()
+        return account
+    }
+
+    public func updateAccount(_ account: BankAccount) throws {
+        let trimmed = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw AccountError.emptyName }
+        guard account.initialBalance >= 0 else { throw AccountError.invalidAmount }
+        let dup = accounts.contains {
+            $0.id != account.id && $0.name.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }
+        guard !dup else { throw AccountError.duplicateName }
+        guard let i = accounts.firstIndex(where: { $0.id == account.id }) else { return }
+        // Desativar a última ativa é bloqueado (o app sempre tem ≥1 conta ativa).
+        if accounts[i].isActive, !account.isActive,
+           !accounts.contains(where: { $0.id != account.id && $0.isActive })
+        {
+            throw AccountError.lastAccount
+        }
+        var copy = account
+        copy.name = trimmed
+        accounts[i] = copy
+        save()
+    }
+
+    public func setAccountActive(id: String, active: Bool) throws {
+        guard let i = accounts.firstIndex(where: { $0.id == id }) else { return }
+        // Arquivar a última ativa é bloqueado (o app sempre tem ≥1 conta ativa).
+        if !active, accounts[i].isActive,
+           !accounts.contains(where: { $0.id != id && $0.isActive })
+        {
+            throw AccountError.lastAccount
+        }
+        accounts[i].isActive = active
+        save()
+    }
+
+    /// Exclusão bloqueada quando há lançamentos vinculados (preserva histórico)
+    /// e quando é a última conta (o app nunca fica sem contas).
+    /// Prefira arquivar (`setAccountActive`) para manter o histórico e sumir do form.
+    /// Se a conta excluída era a do filtro global, volta para Todas.
+    public func deleteAccount(id: String) throws {
+        guard transactions.allSatisfy({ $0.accountID != id }) else {
+            throw AccountError.hasTransactions
+        }
+        guard accounts.count > 1 else {
+            throw AccountError.lastAccount
+        }
+        accounts.removeAll { $0.id == id }
+        if selectedAccountID == id { selectedAccountID = nil }
+        save()
+    }
+
+    public func account(id: String?) -> BankAccount? {
+        guard let id else { return nil }
+        return accounts.first { $0.id == id }
+    }
+
+    /// Contas ativas (usadas no form de lançamento e no filtro).
+    public var activeAccounts: [BankAccount] {
+        accounts.filter(\.isActive).sorted {
+            $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending
+        }
+    }
+
+    public func accountTransactions(accountID: String) -> [FinancialTransaction] {
+        transactions.filter { $0.accountID == accountID }.sorted { $0.dueDate < $1.dueDate }
+    }
+
+    public func balance(ofAccount accountID: String) -> Decimal? {
+        guard let account = accounts.first(where: { $0.id == accountID }) else { return nil }
+        return AccountService.balance(account: account, transactions: transactions)
+    }
+
+    /// Saldos de todas as contas em passe único.
+    public func accountBalances() -> [String: Decimal] {
+        AccountService.balances(accounts: accounts, transactions: transactions)
     }
 
     // MARK: - Faturas
@@ -473,7 +609,8 @@ public final class Store: ObservableObject {
         amount: Decimal,
         description: String,
         dueDate: Date = Date(),
-        notes: String? = nil
+        notes: String? = nil,
+        accountID: String? = nil
     ) throws -> FinancialTransaction {
         guard let fund = funds.first(where: { $0.id == fundID }) else { throw FundError.fundNotFound }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -487,7 +624,8 @@ public final class Store: ObservableObject {
             description: trimmed, type: .payable, amount: amount,
             recurrence: .unique, dueDate: dueDate,
             notes: notes?.isEmpty == true ? nil : notes,
-            fundID: fundID, fundMovementType: movement
+            fundID: fundID, fundMovementType: movement,
+            accountID: accountID ?? selectedAccountID
         ))
         return items[0]
     }
@@ -661,13 +799,15 @@ public final class Store: ObservableObject {
     }
 
     /// Gera conta a pagar única a partir do item (nome/preço/categoria).
+    /// A conta é a informada ou a do filtro global (Todas = sem conta).
     @discardableResult
-    public func generatePayable(itemID: String, dueDate: Date = Date()) throws -> FinancialTransaction {
+    public func generatePayable(itemID: String, dueDate: Date = Date(), accountID: String? = nil) throws -> FinancialTransaction {
         guard let item = wishlistItems.first(where: { $0.id == itemID }) else { throw WishlistError.listNotFound }
         let items = create(TransactionEngine.CreateInput(
             description: item.name, type: .payable, categoryID: item.categoryID,
             amount: item.estimatedPrice, recurrence: .unique, dueDate: dueDate,
-            notes: "Gerado da lista de desejos"
+            notes: "Gerado da lista de desejos",
+            accountID: accountID ?? selectedAccountID
         ))
         return items[0]
     }
@@ -774,27 +914,29 @@ public final class Store: ObservableObject {
         var categories: [FinanceCategory]
         var transactions: [FinancialTransaction]
         var creditCards: [CreditCard]
+        var accounts: [BankAccount]
         var funds: [Fund]
         var budgets: [BudgetLimit]
         var wishlists: [Wishlist]
         var wishlistItems: [WishlistItem]
         var attachments: [TransactionAttachment]
 
-        // Compat: JSON antigo não tem `attachments` nem `creditCards`.
+        // Compat: JSON antigo não tem `attachments`, `creditCards` nem `accounts`.
         private enum Keys: String, CodingKey {
-            case categories, transactions, creditCards, funds, budgets
+            case categories, transactions, creditCards, accounts, funds, budgets
             case wishlists, wishlistItems, attachments
         }
 
         init(
             categories: [FinanceCategory], transactions: [FinancialTransaction],
-            creditCards: [CreditCard], funds: [Fund], budgets: [BudgetLimit],
+            creditCards: [CreditCard], accounts: [BankAccount], funds: [Fund], budgets: [BudgetLimit],
             wishlists: [Wishlist], wishlistItems: [WishlistItem],
             attachments: [TransactionAttachment]
         ) {
             self.categories = categories
             self.transactions = transactions
             self.creditCards = creditCards
+            self.accounts = accounts
             self.funds = funds
             self.budgets = budgets
             self.wishlists = wishlists
@@ -807,6 +949,7 @@ public final class Store: ObservableObject {
             categories = try c.decode([FinanceCategory].self, forKey: .categories)
             transactions = try c.decode([FinancialTransaction].self, forKey: .transactions)
             creditCards = try c.decodeIfPresent([CreditCard].self, forKey: .creditCards) ?? []
+            accounts = try c.decodeIfPresent([BankAccount].self, forKey: .accounts) ?? []
             funds = try c.decode([Fund].self, forKey: .funds)
             budgets = try c.decode([BudgetLimit].self, forKey: .budgets)
             wishlists = try c.decode([Wishlist].self, forKey: .wishlists)
@@ -825,7 +968,7 @@ public final class Store: ObservableObject {
         guard let url = fileURL else { return }
         let snap = Snapshot(
             categories: categories, transactions: transactions,
-            creditCards: creditCards, funds: funds,
+            creditCards: creditCards, accounts: accounts, funds: funds,
             budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
             attachments: attachments
         )
@@ -847,7 +990,7 @@ public final class Store: ObservableObject {
         pendingSaveLock.unlock()
         let snap = Snapshot(
             categories: categories, transactions: transactions,
-            creditCards: creditCards, funds: funds,
+            creditCards: creditCards, accounts: accounts, funds: funds,
             budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
             attachments: attachments
         )
@@ -870,13 +1013,36 @@ public final class Store: ObservableObject {
             categories = snap.categories
             transactions = snap.transactions
             creditCards = snap.creditCards
+            accounts = snap.accounts
             funds = snap.funds
             budgets = snap.budgets
             wishlists = snap.wishlists
             wishlistItems = snap.wishlistItems
             attachments = snap.attachments
+            migrateAccountsIfNeeded()
         } catch {
             // Arquivo ausente na primeira execução: começa vazio e faz seed.
         }
+    }
+
+    /// Upgrade de bases antigas (sem multi-contas): cria a conta padrão e
+    /// move para ela todos os lançamentos que estavam sem conta, para o
+    /// Dashboard/Transações contabilizarem tudo desde o primeiro dia.
+    /// Roda uma única vez (depois `accounts` nunca mais fica vazio).
+    private func migrateAccountsIfNeeded() {
+        guard accounts.isEmpty else { return }
+        let fallback = BankAccount(
+            name: "Carteira",
+            initialBalance: 0,
+            color: "#0ea5e9",
+            icon: "banknote"
+        )
+        accounts = [fallback]
+        var moved = false
+        for i in transactions.indices where transactions[i].accountID == nil {
+            transactions[i].accountID = fallback.id
+            moved = true
+        }
+        if moved { save() }
     }
 }

@@ -22,6 +22,8 @@ public enum TransactionEngine {
         /// `card` (fechamento/vencimento) define o `dueDate` pela fatura.
         public var creditCardID: String?
         public var card: CreditCard?
+        /// Conta bancária/carteira (`nil` = sem conta). Herdada pelas filhas.
+        public var accountID: String?
 
         public init(
             description: String, type: TransactionType, categoryID: String? = nil,
@@ -29,7 +31,8 @@ public enum TransactionEngine {
             notes: String? = nil, totalInstallments: Int? = nil,
             interval: InstallmentInterval? = nil, fundID: String? = nil,
             fundMovementType: FundMovementType? = nil,
-            creditCardID: String? = nil, card: CreditCard? = nil
+            creditCardID: String? = nil, card: CreditCard? = nil,
+            accountID: String? = nil
         ) {
             self.description = description
             self.type = type
@@ -44,6 +47,7 @@ public enum TransactionEngine {
             self.fundMovementType = fundMovementType
             self.creditCardID = creditCardID
             self.card = card
+            self.accountID = accountID
         }
     }
 
@@ -68,7 +72,8 @@ public enum TransactionEngine {
             notes: input.notes,
             fundID: input.fundID,
             fundMovementType: input.fundMovementType,
-            creditCardID: input.creditCardID
+            creditCardID: input.creditCardID,
+            accountID: input.accountID
         )
 
         switch input.recurrence {
@@ -122,7 +127,8 @@ public enum TransactionEngine {
                     parentID: root.id,
                     fundID: root.fundID,
                     fundMovementType: root.fundMovementType,
-                    creditCardID: root.creditCardID
+                    creditCardID: root.creditCardID,
+                    accountID: root.accountID
                 ))
             }
         }
@@ -148,7 +154,8 @@ public enum TransactionEngine {
                 parentID: root.id,
                 fundID: root.fundID,
                 fundMovementType: root.fundMovementType,
-                creditCardID: root.creditCardID
+                creditCardID: root.creditCardID,
+                accountID: root.accountID
             ))
         }
         return out
@@ -210,6 +217,7 @@ public enum TransactionEngine {
         categoryID: String? = nil,
         search: String? = nil,
         creditCardID: String? = nil,
+        accountID: String? = nil,
         includeCardPurchases: Bool = true
     ) -> [FinancialTransaction] {
         all.filter { t in
@@ -218,6 +226,7 @@ public enum TransactionEngine {
             if let status, t.status != status { return false }
             if let categoryID, t.categoryID != categoryID { return false }
             if let creditCardID, t.creditCardID != creditCardID { return false }
+            if let accountID, t.accountID != accountID { return false }
             // A listagem geral não mostra compras no cartão: elas vivem
             // dentro da fatura (detalhe "Fatura do {cartão}").
             if !includeCardPurchases, t.creditCardID != nil { return false }

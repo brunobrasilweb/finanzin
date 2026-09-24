@@ -1,6 +1,6 @@
 import Foundation
 
-/// Categorias padrão do fresh install.
+/// Categorias + conta padrão do fresh install.
 public enum Seed {
     public static func apply(to store: Store) {
         let defaults: [(String, CategoryType, String, String)] = [
@@ -15,6 +15,16 @@ public enum Seed {
         ]
         store.categories = defaults.map { name, type, color, icon in
             FinanceCategory(name: name, type: type, color: color, icon: icon)
+        }
+        // Conta padrão: todo fresh install já nasce multi-contas
+        // (o usuário cadastra as demais em Transações → Contas).
+        if store.accounts.isEmpty {
+            store.accounts = [BankAccount(
+                name: "Carteira",
+                initialBalance: 0,
+                color: "#0ea5e9",
+                icon: "banknote"
+            )]
         }
         store.save()
     }

@@ -10,7 +10,7 @@
 //       var color: String; var icon: String; var createdAt: Date
 //   }
 //   @Model final class TransactionModel {
-//       var id, desc, type, recurrence, categoryID, parentID, fundID...,
+//       var id, desc, type, recurrence, categoryID, accountID, parentID, fundID...,
 //       totalAmount/amount como Double (converter Decimal↔Double na borda),
 //       installmentCount, currentInstallment, dueDate, paidDate, status...,
 //       creditCardID: String? (nil = à vista; fatura derivada via
@@ -21,6 +21,13 @@
 //       var id, name: String; var closingDay, dueDay: Int (1...28)
 //       var isActive: Bool; var createdAt: Date
 //       (exclusão bloqueada com lançamentos vinculados — prefira arquivar)
+//   }
+//   @Model final class BankAccountModel {
+//       var id, name: String; var initialBalance: Double (Decimal↔Double na borda)
+//       var color, icon: String; var isActive: Bool; var createdAt: Date
+//       (exclusão bloqueada com lançamentos vinculados — prefira arquivar,
+//       igual cartões; filtro global `selectedAccountID` fica em UserDefaults,
+//       fora do banco)
 //   }
 //   @Model final class FundModel { id, name, initialAmount(Double), color, icon, notes... }
 //   @Model final class BudgetLimitModel { id, categoryID, month, year, limitAmount(Double)... }

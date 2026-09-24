@@ -14,6 +14,7 @@ public struct TransactionListView: View {
 
     @State private var showingCategories = false
     @State private var showingCards = false
+    @State private var showingAccounts = false
     @State private var editing: FinancialTransaction?
     @State private var settling: FinancialTransaction?
     @State private var pendingDelete: FinancialTransaction?
@@ -40,10 +41,12 @@ public struct TransactionListView: View {
             let entries = invoiceEntries
             let cats = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
             let cards = Dictionary(uniqueKeysWithValues: store.creditCards.map { ($0.id, $0) })
+            let accs = Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, $0) })
             let attachCounts = store.attachmentCounts()
             VStack(spacing: FinSpacing.sm) {
                 ScreenHeader(store.t(.txTitle)) {
                     PrivacyEyeButton()
+                    HeaderButton("banknote") { showingAccounts = true }
                     HeaderButton("creditcard") { showingCards = true }
                     HeaderButton("tag") { showingCategories = true }
                 }
@@ -116,7 +119,7 @@ public struct TransactionListView: View {
                                     isPayable: t.type == .payable,
                                     isIncome: t.type == .receivable,
                                     title: t.description,
-                                    metaText: Self.metaText(for: t, cats: cats, cards: cards, language: store.lang, locale: store.lang.localeIdentifier),
+                                    metaText: Self.metaText(for: t, cats: cats, cards: cards, accounts: accs, language: store.lang, locale: store.lang.localeIdentifier),
                                     attachCount: attachCounts[t.id] ?? 0,
                                     amountText: store.maskedAmount(t.amount),
                                     status: Self.statusInfo(for: t, language: store.lang)
@@ -175,6 +178,10 @@ public struct TransactionListView: View {
                 CreditCardListView()
                     .environmentObject(store)
             }
+            .sheet(isPresented: $showingAccounts) {
+                AccountListView()
+                    .environmentObject(store)
+            }
             .navigationDestination(item: $selectedInvoice) { card in
                 if store.card(id: card.id) != nil {
                     InvoiceDetailView(card: card, year: year, month: month)
@@ -227,6 +234,7 @@ public struct TransactionListView: View {
 
     private var hasActiveFilters: Bool {
         statusFilter != nil || categoryID != nil || cardFilter != nil
+            || store.selectedAccountID != nil
     }
 
     // MARK: - Faturas do mês (uma linha por cartão → detalhe)
@@ -242,11 +250,12 @@ public struct TransactionListView: View {
     /// no filtro "A receber" (cartão só gera conta a pagar).
     private var invoiceEntries: [InvoiceEntry] {
         guard search.isEmpty, statusFilter == nil, typeFilter != .receivable else { return [] }
+        let visible = store.visibleTransactions
         return store.creditCards
             .filter { cardFilter == nil || $0.id == cardFilter }
             .sorted { $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending }
             .compactMap { card in
-                let items = store.invoiceTransactions(cardID: card.id, year: year, month: month)
+                let items = InvoiceService.transactions(visible, cardID: card.id, year: year, month: month)
                 guard !items.isEmpty else { return nil }
                 return InvoiceEntry(card: card, items: items, total: InvoiceService.total(items))
             }
@@ -322,6 +331,20 @@ public struct TransactionListView: View {
                     }
                 }
             }
+            if !store.accounts.isEmpty {
+                Section(store.t(.accountFilter)) {
+                    Button { store.setSelectedAccount(nil) } label: {
+                        statusOption(store.t(.accountAll), active: store.selectedAccountID == nil)
+                    }
+                    ForEach(store.accounts.sorted {
+                        $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending
+                    }) { account in
+                        Button { store.setSelectedAccount(account.id) } label: {
+                            statusOption(account.name, active: store.selectedAccountID == account.id)
+                        }
+                    }
+                }
+            }
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "line.3.horizontal.decrease")
@@ -351,8 +374,9 @@ public struct TransactionListView: View {
 
     private var filtered: [FinancialTransaction] {
         // Compras no cartão fora da listagem: só aparecem no detalhe da fatura.
+        // `visibleTransactions` já aplica o filtro global de conta.
         TransactionEngine.filter(
-            store.transactions, year: year, month: month,
+            store.visibleTransactions, year: year, month: month,
             type: typeFilter, status: statusFilter,
             categoryID: categoryID,
             search: search.isEmpty ? nil : search,
@@ -364,12 +388,16 @@ public struct TransactionListView: View {
         for t: FinancialTransaction,
         cats: [String: FinanceCategory],
         cards: [String: CreditCard],
+        accounts: [String: BankAccount],
         language: AppLanguage,
         locale: String
     ) -> String {
         var parts: [String] = []
         if let cat = t.categoryID.flatMap({ cats[$0] }) {
             parts.append(cat.name)
+        }
+        if let account = t.accountID.flatMap({ accounts[$0] }) {
+            parts.append(account.name)
         }
         if let card = t.creditCardID.flatMap({ cards[$0] }) {
             parts.append(card.name)
@@ -515,6 +543,7 @@ public struct TransactionFormView: View {
     @State private var type: TransactionType
     @State private var amount: Decimal
     @State private var categoryID: String?
+    @State private var accountID: String?
     @State private var dueDate: Date
     @State private var status: TransactionStatus
     @State private var notes: String
@@ -566,6 +595,7 @@ public struct TransactionFormView: View {
         _type = State(initialValue: editing?.type ?? draft?.type ?? .payable)
         _amount = State(initialValue: editing?.amount ?? draft?.amount ?? 0)
         _categoryID = State(initialValue: editing?.categoryID ?? draft?.categoryID)
+        _accountID = State(initialValue: editing?.accountID ?? draft?.accountID)
         _dueDate = State(initialValue: editing?.dueDate ?? draft?.date ?? Date())
         _status = State(initialValue: {
             if let editing {
@@ -654,6 +684,8 @@ public struct TransactionFormView: View {
                             .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
                         categoryMenu
                         Divider().overlay(VercelTheme.border)
+                        AccountPickerField(accountID: $accountID)
+                        Divider().overlay(VercelTheme.border)
                         FormDateField(
                             store.t(.txDueDate), date: $dueDate,
                             localeIdentifier: store.lang.localeIdentifier,
@@ -727,7 +759,14 @@ public struct TransactionFormView: View {
                 .padding(.vertical, FinSpacing.sm)
                 .background(VercelTheme.bg)
             }
-            .onAppear { if shouldExpandMore { showMore = true } }
+            .onAppear {
+                if shouldExpandMore { showMore = true }
+                // Novo lançamento herda a conta do filtro global (ou a
+                // primeira ativa); "Todas" + nenhuma conta = sem conta.
+                if editing == nil, accountID == nil {
+                    accountID = store.selectedAccountID ?? store.activeAccounts.first?.id
+                }
+            }
             .navigationTitle(editing == nil ? (isQuickAdd ? store.t(.quickAddTitle) : store.t(.txNewTitle)) : store.t(.txEditTitle))
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -1233,6 +1272,7 @@ public struct TransactionFormView: View {
                 targetID: edit.id, scope: scope,
                 edit: Store.SeriesEdit(
                     description: trimmed, type: type, categoryID: categoryID,
+                    accountID: accountID,
                     amount: amountDecimal, notes: notesValue,
                     status: status != edit.status ? status : nil
                 )
@@ -1243,6 +1283,7 @@ public struct TransactionFormView: View {
             edit.amount = amountDecimal
             edit.totalAmount = amountDecimal
             edit.categoryID = categoryID
+            edit.accountID = accountID
             edit.dueDate = dueDate
             edit.notes = notesValue
             if status == .paid && edit.status != .paid {
@@ -1259,7 +1300,8 @@ public struct TransactionFormView: View {
                 notes: notesValue,
                 totalInstallments: recurrence == .installment ? installmentCount : nil,
                 interval: recurrence == .installment || recurrence == .recurring ? interval : nil,
-                creditCardID: card?.id, card: card
+                creditCardID: card?.id, card: card,
+                accountID: accountID ?? store.selectedAccountID
             )
             let items = store.create(input)
             // Pendentes (foto/arquivo escolhidos antes de salvar) vão para a

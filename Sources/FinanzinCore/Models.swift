@@ -74,12 +74,60 @@ public struct CreditCard: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+/// Conta bancária/carteira do multi-contas.
+/// O saldo é virtual: `initialBalance` + lançamentos baixados (ver `AccountService`).
+public struct BankAccount: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var name: String
+    public var initialBalance: Decimal
+    public var color: String
+    public var icon: String
+    public var isActive: Bool
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        name: String,
+        initialBalance: Decimal = 0,
+        color: String = "#0ea5e9",
+        icon: String = "banknote",
+        isActive: Bool = true,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.initialBalance = initialBalance
+        self.color = color
+        self.icon = icon
+        self.isActive = isActive
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, initialBalance, color, icon, isActive, createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        initialBalance = try c.decodeIfPresent(Decimal.self, forKey: .initialBalance) ?? 0
+        color = try c.decodeIfPresent(String.self, forKey: .color) ?? "#0ea5e9"
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "banknote"
+        // Compat: JSON antigo não tem a chave.
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+}
+
 public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
     public var id: String
     public var description: String
     public var type: TransactionType
     public var recurrence: RecurrenceType
     public var categoryID: String?
+    /// Conta bancária/carteira do lançamento (`nil` = sem conta, legado).
+    public var accountID: String?
     public var totalAmount: Decimal
     public var amount: Decimal
     public var installmentCount: Int
@@ -115,6 +163,7 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
         fundID: String? = nil,
         fundMovementType: FundMovementType? = nil,
         creditCardID: String? = nil,
+        accountID: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -122,6 +171,7 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
         self.type = type
         self.recurrence = recurrence
         self.categoryID = categoryID
+        self.accountID = accountID
         self.amount = amount
         self.totalAmount = totalAmount ?? amount
         self.installmentCount = installmentCount
@@ -139,7 +189,7 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, description, type, recurrence, categoryID, totalAmount, amount
+        case id, description, type, recurrence, categoryID, accountID, totalAmount, amount
         case installmentCount, currentInstallment, installmentInterval
         case dueDate, paidDate, status, notes, parentID, fundID, fundMovementType
         case creditCardID, createdAt
@@ -152,6 +202,8 @@ public struct FinancialTransaction: Identifiable, Hashable, Codable, Sendable {
         type = try c.decode(TransactionType.self, forKey: .type)
         recurrence = try c.decode(RecurrenceType.self, forKey: .recurrence)
         categoryID = try c.decodeIfPresent(String.self, forKey: .categoryID)
+        // Compat: JSON antigo não tem a chave.
+        accountID = try c.decodeIfPresent(String.self, forKey: .accountID)
         totalAmount = try c.decode(Decimal.self, forKey: .totalAmount)
         amount = try c.decode(Decimal.self, forKey: .amount)
         installmentCount = try c.decodeIfPresent(Int.self, forKey: .installmentCount) ?? 1

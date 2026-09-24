@@ -587,6 +587,7 @@ func testResetToDefaults() {
     let list = try! store.addWishlist(name: "L", color: "#fff", icon: "x")
     try! store.addItem(wishlistID: list.id, name: "I", price: 10, priority: .low, categoryID: nil, notes: nil)
     _ = try! store.addCard(name: "N", closingDay: 10, dueDay: 17)
+    _ = try! store.addAccount(name: "Extra", initialBalance: 10, color: "#fff", icon: "x")
     let settingsBefore = store.settings
     store.resetToDefaults()
     check(store.transactions.isEmpty, "transações apagadas")
@@ -595,6 +596,7 @@ func testResetToDefaults() {
     check(store.budgets.isEmpty, "orçamentos apagados")
     check(store.wishlists.isEmpty && store.wishlistItems.isEmpty, "listas apagadas")
     check(store.categories.count == 8, "só as 8 categorias padrão (obtido \(store.categories.count))")
+    check(store.accounts.count == 1 && store.accounts[0].name == "Carteira", "só a conta padrão Carteira")
     check(store.settings == settingsBefore, "preferências preservadas")
 }
 
@@ -1420,8 +1422,243 @@ func testCardSnapshotCompatOldJSON() {
     try! Data(raw.utf8).write(to: json)
     let store = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
     check(store.creditCards.isEmpty, "JSON antigo abre sem cartões")
+    // Migração: base sem contas ganha a Carteira e o lançamento vai para ela.
+    check(store.accounts.count == 1, "migração cria a conta padrão")
+    check(store.accounts[0].name == "Carteira", "conta padrão é a Carteira")
     check(store.transactions.count == 1, "transação antiga carrega")
     check(store.transactions[0].creditCardID == nil, "sem vínculo de cartão")
+    check(store.transactions[0].accountID == store.accounts[0].id, "lançamento antigo vai para a Carteira")
+}
+
+// MARK: - Multi-contas
+
+func testAccountCRUD() {
+    let store = Store(seedIfEmpty: false)
+    let acc = try! store.addAccount(name: "Nubank", initialBalance: 2500, color: "#8b5cf6", icon: "banknote")
+    check(store.activeAccounts.count == 1, "1 conta ativa")
+    do {
+        _ = try store.addAccount(name: "nubank", initialBalance: 0, color: "#fff", icon: "x")
+        check(false, "nome duplicado deveria lançar")
+    } catch Store.AccountError.duplicateName {
+        check(true, "duplicado lança duplicateName")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    do {
+        _ = try store.addAccount(name: "Negativa", initialBalance: -1, color: "#fff", icon: "x")
+        check(false, "saldo negativo deveria lançar")
+    } catch Store.AccountError.invalidAmount {
+        check(true, "lança invalidAmount")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    do {
+        _ = try store.addAccount(name: "  ", initialBalance: 0, color: "#fff", icon: "x")
+        check(false, "nome vazio deveria lançar")
+    } catch Store.AccountError.emptyName {
+        check(true, "lança emptyName")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Arquivar a única conta é bloqueado (o app nunca fica sem conta ativa).
+    do {
+        try store.setAccountActive(id: acc.id, active: false)
+        check(false, "arquivar a última deveria lançar")
+    } catch Store.AccountError.lastAccount {
+        check(true, "bloqueia com lastAccount")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Com 2 contas, arquivar uma libera normal.
+    let second = try! store.addAccount(name: "Segunda", initialBalance: 0, color: "#fff", icon: "x")
+    try! store.setAccountActive(id: acc.id, active: false)
+    check(store.activeAccounts.count == 1, "arquivada some das ativas")
+    check(store.account(id: acc.id)?.isActive == false, "flag persiste")
+    try! store.setAccountActive(id: acc.id, active: true)
+    // Conta sem lançamentos exclui normal (havendo outra).
+    try! store.deleteAccount(id: second.id)
+    check(store.account(id: second.id) == nil, "conta vazia excluída")
+    // Excluir a última conta é bloqueado, mesmo vazia.
+    do {
+        try store.deleteAccount(id: acc.id)
+        check(false, "excluir a última deveria lançar")
+    } catch Store.AccountError.lastAccount {
+        check(true, "bloqueia exclusão da última")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Desativar a última ativa pelo form (update) também bloqueia.
+    var archived = acc
+    archived.isActive = false
+    do {
+        try store.updateAccount(archived)
+        check(false, "update desativando a última deveria lançar")
+    } catch Store.AccountError.lastAccount {
+        check(true, "update bloqueia com lastAccount")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+}
+
+func testAccountDeleteBlockedWithTransactions() {
+    let store = Store(seedIfEmpty: false)
+    let acc = try! store.addAccount(name: "Nubank", initialBalance: 0, color: "#fff", icon: "x")
+    _ = store.create(.init(
+        description: "Compra", type: .payable, amount: 100,
+        dueDate: D(2026, 9, 8), accountID: acc.id
+    ))
+    do {
+        try store.deleteAccount(id: acc.id)
+        check(false, "com lançamentos deveria lançar")
+    } catch Store.AccountError.hasTransactions {
+        check(true, "bloqueia com hasTransactions")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+    // Excluir a conta selecionada no filtro volta para Todas.
+    store.setSelectedAccount(acc.id)
+    store.deleteTransactions(ids: store.transactions.map(\.id))
+    let other = try! store.addAccount(name: "Outra", initialBalance: 0, color: "#fff", icon: "x")
+    try! store.deleteAccount(id: acc.id)
+    check(store.account(id: acc.id) == nil, "conta excluída")
+    check(store.selectedAccountID == nil, "filtro volta para Todas")
+    // E a que sobrou virou a última: não sai mais.
+    do {
+        try store.deleteAccount(id: other.id)
+        check(false, "excluir a última deveria lançar")
+    } catch Store.AccountError.lastAccount {
+        check(true, "última conta protegida")
+    } catch {
+        check(false, "erro inesperado: \(error)")
+    }
+}
+
+func testAccountBalance() {
+    let acc = BankAccount(name: "N", initialBalance: 1000)
+    let tx: [FinancialTransaction] = [
+        .init(description: "Salário", type: .receivable, amount: 500, dueDate: D(2026, 10, 5), status: .paid, accountID: acc.id),
+        .init(description: "Aluguel", type: .payable, amount: 300, dueDate: D(2026, 10, 5), status: .paid, accountID: acc.id),
+        .init(description: "Pendente", type: .payable, amount: 999, dueDate: D(2026, 10, 6), status: .pending, accountID: acc.id),
+        .init(description: "Cancelada", type: .payable, amount: 999, dueDate: D(2026, 10, 6), status: .canceled, accountID: acc.id),
+        .init(description: "Outra conta", type: .payable, amount: 999, dueDate: D(2026, 10, 6), status: .paid, accountID: "outra"),
+        .init(description: "Sem conta", type: .payable, amount: 999, dueDate: D(2026, 10, 6), status: .paid),
+    ]
+    eq(AccountService.balance(account: acc, transactions: tx), 1200, "saldo = 1000 + 500 − 300 (pendente/cancelada/outras fora)")
+}
+
+func testAccountBalancesBatch() {
+    let store = Store(seedIfEmpty: false)
+    let a = try! store.addAccount(name: "A", initialBalance: 100, color: "#fff", icon: "x")
+    let b = try! store.addAccount(name: "B", initialBalance: 0, color: "#fff", icon: "x")
+    _ = store.create(.init(description: "In", type: .receivable, amount: 50, dueDate: D(2026, 10, 1), accountID: a.id))
+    for t in store.transactions { store.updateStatus(id: t.id, to: .paid) }
+    _ = store.create(.init(description: "Out", type: .payable, amount: 20, dueDate: D(2026, 10, 2), accountID: b.id))
+    for t in store.transactions where t.status == .pending { store.updateStatus(id: t.id, to: .paid) }
+    let balances = store.accountBalances()
+    eq(balances[a.id] ?? -1, 150, "saldo A em lote")
+    eq(balances[b.id] ?? -1, -20, "saldo B em lote")
+    eq(store.balance(ofAccount: a.id) ?? -1, 150, "balance(ofAccount:) confere")
+    check(store.balance(ofAccount: "inexistente") == nil, "conta inexistente → nil")
+}
+
+func testAccountPropagatesToSeries() {
+    let store = Store(seedIfEmpty: false)
+    let acc = try! store.addAccount(name: "N", initialBalance: 0, color: "#fff", icon: "x")
+    let items = store.create(.init(
+        description: "TV", type: .payable, amount: 3000,
+        recurrence: .installment, dueDate: D(2026, 9, 8),
+        totalInstallments: 3, interval: .monthly, accountID: acc.id
+    ))
+    check(items.count == 3, "3 parcelas geradas")
+    check(items.allSatisfy { $0.accountID == acc.id }, "conta propagada às filhas")
+    let fixed = store.create(.init(
+        description: "Net", type: .payable, amount: 100,
+        recurrence: .fixed, dueDate: D(2026, 9, 8), accountID: acc.id
+    ))
+    check(fixed.allSatisfy { $0.accountID == acc.id }, "conta propagada à série fixa")
+}
+
+func testFilterByAccount() {
+    let a = FinancialTransaction(description: "A", type: .payable, amount: 10, dueDate: D(2026, 9, 8), accountID: "acc-a")
+    let b = FinancialTransaction(description: "B", type: .payable, amount: 10, dueDate: D(2026, 9, 8), accountID: "acc-b")
+    let c = FinancialTransaction(description: "C", type: .payable, amount: 10, dueDate: D(2026, 9, 8))
+    let out = TransactionEngine.filter([a, b, c], year: 2026, month: 9, accountID: "acc-a")
+    check(out.count == 1 && out[0].description == "A", "filtro por conta")
+    let full = TransactionEngine.filter([a, b, c], year: 2026, month: 9)
+    check(full.count == 3, "sem filtro inclui tudo (compat)")
+}
+
+func testVisibleTransactionsFilter() {
+    let store = Store(seedIfEmpty: false)
+    defer { store.setSelectedAccount(nil) }
+    let acc = try! store.addAccount(name: "N", initialBalance: 0, color: "#fff", icon: "x")
+    _ = store.create(.init(description: "Na conta", type: .payable, amount: 10, dueDate: D(2026, 10, 1), accountID: acc.id))
+    _ = store.create(.init(description: "Fora", type: .payable, amount: 10, dueDate: D(2026, 10, 1)))
+    check(store.visibleTransactions.count == 2, "sem seleção mostra tudo")
+    store.setSelectedAccount(acc.id)
+    let vis = store.visibleTransactions
+    check(vis.count == 1 && vis[0].description == "Na conta", "filtro global isola a conta")
+    // Métricas obedecem ao filtro.
+    let m = MetricsService.monthly(store.visibleTransactions, year: 2026, month: 10)
+    eq(m.pendingPayable, 10, "métrica só da conta")
+    // Seleção órfã (conta removida) cai para Todas em vez de vazio.
+    store.setSelectedAccount("inexistente")
+    check(store.visibleTransactions.count == 2, "seleção órfã mostra tudo")
+}
+
+func testGeneratePayableUsesSelectedAccount() {
+    let store = Store(seedIfEmpty: false)
+    defer { store.setSelectedAccount(nil) }
+    let acc = try! store.addAccount(name: "N", initialBalance: 0, color: "#fff", icon: "x")
+    let list = try! store.addWishlist(name: "L", color: "#fff", icon: "x")
+    let item = try! store.addItem(wishlistID: list.id, name: "I", price: 10, priority: .low, categoryID: nil, notes: nil)
+    store.setSelectedAccount(acc.id)
+    let tx = try! store.generatePayable(itemID: item.id)
+    check(tx.accountID == acc.id, "desejo gera conta na conta selecionada")
+}
+
+func testSeedCreatesDefaultAccount() {
+    let store = Store(seedIfEmpty: false)
+    check(store.accounts.isEmpty, "sem seed não há contas")
+    Seed.apply(to: store)
+    check(store.accounts.count == 1, "seed cria 1 conta padrão (obtido \(store.accounts.count))")
+    check(store.accounts[0].name == "Carteira", "conta padrão é a Carteira")
+    Seed.apply(to: store)
+    check(store.accounts.count == 1, "re-seed não duplica a conta")
+}
+
+func testAccountSnapshotRoundTrip() {
+    let dir = testAttachmentsDir()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let json = dir.appendingPathComponent("finanzin.json")
+    let store = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    let acc = try! store.addAccount(name: "N", initialBalance: 42, color: "#fff", icon: "x")
+    _ = store.create(.init(description: "T", type: .payable, amount: 10, dueDate: D(2026, 10, 1), accountID: acc.id))
+    store.flush()
+    let reopened = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    check(reopened.accounts.count == 1 && reopened.accounts[0].name == "N", "conta persiste no JSON")
+    eq(reopened.accounts[0].initialBalance, 42, "saldo inicial persiste")
+    check(reopened.transactions.first?.accountID == acc.id, "vínculo persiste")
+}
+
+func testMigrateOldBaseToDefaultAccount() {
+    // Base antiga: contas inexistentes, lançamentos sem conta.
+    let dir = testAttachmentsDir()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let json = dir.appendingPathComponent("finanzin.json")
+    let raw = """
+    {"categories":[],"transactions":[{"id":"t1","description":"A","type":"payable","recurrence":"unique","totalAmount":10,"amount":10,"installmentCount":1,"dueDate":789123456,"status":"paid"},{"id":"t2","description":"B","type":"receivable","recurrence":"unique","totalAmount":50,"amount":50,"installmentCount":1,"dueDate":789123456,"status":"paid"}],"funds":[],"budgets":[],"wishlists":[],"wishlistItems":[]}
+    """
+    try! Data(raw.utf8).write(to: json)
+    let store = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    check(store.accounts.count == 1, "migração cria exatamente 1 conta")
+    let carteirinha = store.accounts[0].id
+    check(store.transactions.allSatisfy { $0.accountID == carteirinha }, "tudo vai para a Carteira")
+    // Saldo da Carteira contabiliza os antigos (50 − 10 sobre inicial 0).
+    eq(store.balance(ofAccount: carteirinha) ?? -999, 40, "balanço inclui registros migrados")
+    // Reabrir não duplica nem move de novo.
+    let reopened = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
+    check(reopened.accounts.count == 1, "reabertura não duplica a conta")
 }
 
 @main
@@ -1526,6 +1763,17 @@ struct TestRunner {
             ("testMonthlyInvoicesTotalAcrossCards", testMonthlyInvoicesTotalAcrossCards),
             ("testDeleteInvoiceRemovesAllEntries", testDeleteInvoiceRemovesAllEntries),
             ("testCardSnapshotCompatOldJSON", testCardSnapshotCompatOldJSON),
+            ("testAccountCRUD", testAccountCRUD),
+            ("testAccountDeleteBlockedWithTransactions", testAccountDeleteBlockedWithTransactions),
+            ("testAccountBalance", testAccountBalance),
+            ("testAccountBalancesBatch", testAccountBalancesBatch),
+            ("testAccountPropagatesToSeries", testAccountPropagatesToSeries),
+            ("testFilterByAccount", testFilterByAccount),
+            ("testVisibleTransactionsFilter", testVisibleTransactionsFilter),
+            ("testGeneratePayableUsesSelectedAccount", testGeneratePayableUsesSelectedAccount),
+            ("testSeedCreatesDefaultAccount", testSeedCreatesDefaultAccount),
+            ("testAccountSnapshotRoundTrip", testAccountSnapshotRoundTrip),
+            ("testMigrateOldBaseToDefaultAccount", testMigrateOldBaseToDefaultAccount),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

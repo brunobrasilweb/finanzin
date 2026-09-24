@@ -23,6 +23,13 @@ public enum DemoData {
         let transporte = cat("Transporte", .expense)
         let lazer = cat("Lazer", .expense)
 
+        // Contas: a "Carteira" vem do Seed; a demo soma Nubank e Inter.
+        let carteira = store.accounts.first(where: { $0.name == "Carteira" })
+        let nubankAcc = store.accounts.first(where: { $0.name == "Nubank" })
+            ?? (try? store.addAccount(name: "Nubank", initialBalance: 2500, color: "#8b5cf6", icon: "banknote"))
+        let interAcc = store.accounts.first(where: { $0.name == "Inter" })
+            ?? (try? store.addAccount(name: "Inter", initialBalance: 1200, color: "#f59e0b", icon: "banknote"))
+
         // 5 meses de salário + aluguel + mercado (para a evolução de 6 meses).
         for back in stride(from: 4, through: 0, by: -1) {
             let base = cal.date(from: DateComponents(year: curY, month: curM, day: 1)) ?? now
@@ -30,19 +37,22 @@ public enum DemoData {
             let c = cal.dateComponents([.year, .month], from: ref)
             let m = TransactionEngine.CreateInput(
                 description: "Salário", type: .receivable, categoryID: salario,
-                amount: 6000, recurrence: .unique, dueDate: day(c.year!, c.month!, 5)
+                amount: 6000, recurrence: .unique, dueDate: day(c.year!, c.month!, 5),
+                accountID: nubankAcc?.id
             )
             let created = store.create(m)
             for t in created { store.updateStatus(id: t.id, to: .paid) }
             let rent = TransactionEngine.CreateInput(
                 description: "Aluguel", type: .payable, categoryID: moradia,
-                amount: 1800, recurrence: .unique, dueDate: day(c.year!, c.month!, 10)
+                amount: 1800, recurrence: .unique, dueDate: day(c.year!, c.month!, 10),
+                accountID: nubankAcc?.id
             )
             for t in store.create(rent) { store.updateStatus(id: t.id, to: .paid) }
             let groc = TransactionEngine.CreateInput(
                 description: "Mercado semanal", type: .payable, categoryID: mercado,
                 amount: 350 + Decimal(back * 20), recurrence: .unique,
-                dueDate: day(c.year!, c.month!, 12)
+                dueDate: day(c.year!, c.month!, 12),
+                accountID: interAcc?.id
             )
             let g = store.create(groc)
             if back > 0 { for t in g { store.updateStatus(id: t.id, to: .paid) } }
@@ -55,19 +65,22 @@ public enum DemoData {
             description: "iPhone 16", type: .payable, categoryID: lazer,
             amount: 5000, recurrence: .installment, dueDate: day(curY, curM, 8),
             totalInstallments: 10, interval: .monthly,
-            creditCardID: nubank?.id, card: nubank
+            creditCardID: nubank?.id, card: nubank,
+            accountID: nubankAcc?.id
         ))
 
         // Transporte pendente (próximos 7 dias) + vencido de propósito.
         _ = store.create(TransactionEngine.CreateInput(
             description: "Uber", type: .payable, categoryID: transporte,
             amount: 45, recurrence: .unique,
-            dueDate: cal.date(byAdding: .day, value: 2, to: now) ?? now
+            dueDate: cal.date(byAdding: .day, value: 2, to: now) ?? now,
+            accountID: carteira?.id
         ))
         _ = store.create(TransactionEngine.CreateInput(
             description: "Estacionamento", type: .payable, categoryID: transporte,
             amount: 30, recurrence: .unique,
-            dueDate: cal.date(byAdding: .day, value: -3, to: now) ?? now
+            dueDate: cal.date(byAdding: .day, value: -3, to: now) ?? now,
+            accountID: carteira?.id
         ))
 
         // Fundo + aporte.
@@ -77,7 +90,8 @@ public enum DemoData {
         ) {
             _ = try? store.addFundMovement(
                 fundID: fund.id, movement: .application, amount: 400,
-                description: "Aporte Viagem Japão", dueDate: day(curY, curM, 15)
+                description: "Aporte Viagem Japão", dueDate: day(curY, curM, 15),
+                accountID: nubankAcc?.id
             )
         }
 
@@ -101,6 +115,6 @@ public enum DemoData {
             )
         }
 
-        print("[FinanzinDemo] \(store.transactions.count) transações, \(store.funds.count) fundos, \(store.budgets.count) orçamentos, \(store.wishlists.count) listas")
+        print("[FinanzinDemo] \(store.transactions.count) transações, \(store.accounts.count) contas, \(store.funds.count) fundos, \(store.budgets.count) orçamentos, \(store.wishlists.count) listas")
     }
 }

@@ -24,6 +24,8 @@ public struct TransactionDraft: Hashable, Sendable {
     public var interval: InstallmentInterval?
     /// Cartão citado ou único ativo ("cartão nubank", "no cartão").
     public var creditCardID: String?
+    /// Conta do lançamento (filtro global vigente ao registrar).
+    public var accountID: String?
     /// Menção genérica ao cartão sem identificar qual (o form pede).
     public var payOnCard: Bool
 
@@ -32,6 +34,7 @@ public struct TransactionDraft: Hashable, Sendable {
         type: TransactionType? = nil, categoryID: String? = nil,
         installmentCount: Int? = nil, recurrence: RecurrenceType? = nil,
         interval: InstallmentInterval? = nil, creditCardID: String? = nil,
+        accountID: String? = nil,
         payOnCard: Bool = false
     ) {
         self.amount = amount
@@ -43,6 +46,7 @@ public struct TransactionDraft: Hashable, Sendable {
         self.recurrence = recurrence
         self.interval = interval
         self.creditCardID = creditCardID
+        self.accountID = accountID
         self.payOnCard = payOnCard
     }
 

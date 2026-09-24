@@ -146,6 +146,27 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case cardErrDuplicate
     case cardErrDay
     case cardDeleteBlocked
+    // Contas (multi-contas)
+    case accountTitle
+    case accountAll
+    case accountNoAccount
+    case accountManage
+    case accountEmptyTitle
+    case accountEmptySubtitle
+    case accountNewTitle
+    case accountEditTitle
+    case accountNamePh
+    case accountInitialBalance
+    case accountActive
+    case accountArchived
+    case accountArchive
+    case accountUnarchive
+    case accountErrDuplicate
+    case accountErrAmount
+    case accountDeleteBlocked
+    case accountLastBlocked
+    case accountFilter
+    case accountBalance
     // Comprovantes (anexos)
     case txReceipts
     case txAttachFile
@@ -444,6 +465,26 @@ public enum L10n {
         case .cardErrDuplicate: "Já existe um cartão com esse nome."
         case .cardErrDay: "Fechamento e vencimento devem ser entre 1 e 31."
         case .cardDeleteBlocked: "“%@” tem lançamentos e não pode ser excluído (arquive para esconder do form)."
+        case .accountTitle: "Contas"
+        case .accountAll: "Todas as contas"
+        case .accountNoAccount: "Sem conta"
+        case .accountManage: "Contas"
+        case .accountEmptyTitle: "Sem contas"
+        case .accountEmptySubtitle: "Cadastre suas contas e carteiras para separar os lançamentos."
+        case .accountNewTitle: "Nova conta"
+        case .accountEditTitle: "Editar conta"
+        case .accountNamePh: "Nome (ex.: Nubank, Carteira)"
+        case .accountInitialBalance: "Saldo inicial"
+        case .accountActive: "Ativa"
+        case .accountArchived: "Arquivada"
+        case .accountArchive: "Arquivar"
+        case .accountUnarchive: "Reativar"
+        case .accountErrDuplicate: "Já existe uma conta com esse nome."
+        case .accountErrAmount: "Saldo inicial não pode ser negativo."
+        case .accountDeleteBlocked: "“%@” tem lançamentos e não pode ser excluída (arquive para esconder do form)."
+        case .accountLastBlocked: "Não é possível remover ou arquivar a última conta."
+        case .accountFilter: "Conta"
+        case .accountBalance: "Saldo"
         case .txReceipts: "Comprovantes"
         case .txAttachFile: "Anexar arquivo"
         case .txTakePhoto: "Tirar foto"
@@ -734,6 +775,26 @@ public enum L10n {
         case .cardErrDuplicate: "A card with this name already exists."
         case .cardErrDay: "Closing and due days must be between 1 and 31."
         case .cardDeleteBlocked: "“%@” has transactions and cannot be deleted (archive it to hide from the form)."
+        case .accountTitle: "Accounts"
+        case .accountAll: "All accounts"
+        case .accountNoAccount: "No account"
+        case .accountManage: "Accounts"
+        case .accountEmptyTitle: "No accounts"
+        case .accountEmptySubtitle: "Add your bank accounts and wallets to split transactions."
+        case .accountNewTitle: "New account"
+        case .accountEditTitle: "Edit account"
+        case .accountNamePh: "Name (e.g. Nubank, Wallet)"
+        case .accountInitialBalance: "Opening balance"
+        case .accountActive: "Active"
+        case .accountArchived: "Archived"
+        case .accountArchive: "Archive"
+        case .accountUnarchive: "Unarchive"
+        case .accountErrDuplicate: "An account with this name already exists."
+        case .accountErrAmount: "Opening balance cannot be negative."
+        case .accountDeleteBlocked: "“%@” has transactions and cannot be deleted (archive it to hide from the form)."
+        case .accountLastBlocked: "You can't remove or archive the last account."
+        case .accountFilter: "Account"
+        case .accountBalance: "Balance"
         case .txReceipts: "Receipts"
         case .txAttachFile: "Attach file"
         case .txTakePhoto: "Take photo"

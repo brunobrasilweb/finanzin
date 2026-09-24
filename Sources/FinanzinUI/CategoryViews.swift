@@ -56,39 +56,32 @@ public struct CategoryListView: View {
                 } else {
                     List {
                         ForEach(filtered) { cat in
-                            HStack(spacing: FinSpacing.md) {
-                                TintedIcon(cat.icon, tint: VercelTheme.hex(cat.color))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(cat.name)
-                                        .font(.subheadline.bold())
-                                        .foregroundStyle(VercelTheme.textPrimary)
-                                    Text(cat.type.label(language: store.lang))
-                                        .font(.caption)
-                                        .foregroundStyle(VercelTheme.textSecondary)
+                            CategoryRow(
+                                icon: cat.icon,
+                                tintHex: cat.color,
+                                title: cat.name,
+                                subtitle: cat.type.label(language: store.lang)
+                            )
+                                .finCleanRow()
+                                .padding(.vertical, 2)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        store.deleteCategory(id: cat.id)
+                                    } label: {
+                                        Label(store.t(.delete), systemImage: "trash")
+                                    }
+                                    .tint(.red)
+                                    Button {
+                                        editing = cat
+                                    } label: {
+                                        Label(store.t(.edit), systemImage: "pencil")
+                                    }
+                                    .tint(.blue)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(VercelTheme.textTertiary)
-                            }
-                            .finRow()
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    store.deleteCategory(id: cat.id)
-                                } label: {
-                                    Label(store.t(.delete), systemImage: "trash")
-                                }
-                                .tint(.red)
-                                Button {
-                                    editing = cat
-                                } label: {
-                                    Label(store.t(.edit), systemImage: "pencil")
-                                }
-                                .tint(.blue)
-                            }
+                                .onTapGesture { editing = cat }
                         }
                     }
-                    .finList()
+                    .finCleanList()
                 }
             }
             .finBackground()
@@ -108,6 +101,33 @@ public struct CategoryListView: View {
         store.categories
             .filter { filter == nil || $0.type == filter }
             .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+    }
+}
+
+// MARK: - Linha estreita da lista (só `let`s)
+
+struct CategoryRow: View {
+    let icon: String
+    let tintHex: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: FinSpacing.md) {
+            TintedIcon(icon, tint: VercelTheme.hex(tintHex))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.textPrimary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(VercelTheme.textSecondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundStyle(VercelTheme.textTertiary)
+        }
     }
 }
 

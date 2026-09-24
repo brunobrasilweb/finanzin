@@ -36,6 +36,8 @@ public struct DashboardView: View {
                         year: $year, month: $month,
                         localeIdentifier: store.lang.localeIdentifier
                     )
+                    AccountFilterBar()
+                        .padding(.horizontal, FinSpacing.lg)
                     heroCard(m)
                     statGrid(m)
                     fundsCard
@@ -65,12 +67,12 @@ public struct DashboardView: View {
     // MARK: - Dados
 
     private var metrics: MonthlyMetrics {
-        MetricsService.monthly(store.transactions, year: year, month: month)
+        MetricsService.monthly(store.visibleTransactions, year: year, month: month)
     }
 
     private var breakdown: [CategoryBreakdown] {
         MetricsService.breakdown(
-            store.transactions, categories: store.categories,
+            store.visibleTransactions, categories: store.categories,
             year: year, month: month
         )
     }
@@ -78,13 +80,13 @@ public struct DashboardView: View {
     private var evolution: [MonthlyEvolution] {
         let base = Calendar.current.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
         return MetricsService.evolution(
-            store.transactions, months: 6, base: base,
+            store.visibleTransactions, months: 6, base: base,
             localeIdentifier: store.lang.localeIdentifier
         )
     }
 
     private var upcoming: [FinancialTransaction] {
-        MetricsService.upcoming(store.transactions, days: 7)
+        MetricsService.upcoming(store.visibleTransactions, days: 7)
     }
 
     // MARK: - Hero de saldo
@@ -169,11 +171,13 @@ public struct DashboardView: View {
     }
 
     /// Um resumo por cartão com lançamentos no mês + total geral.
+    /// Respeita o filtro global de conta (só a conta selecionada conta).
     private var invoiceSummaries: [InvoiceSummary] {
-        store.creditCards
+        let visible = store.visibleTransactions
+        return store.creditCards
             .sorted { $0.name.compare($1.name, options: .caseInsensitive) == .orderedAscending }
             .compactMap { card in
-                let items = store.invoiceTransactions(cardID: card.id, year: year, month: month)
+                let items = InvoiceService.transactions(visible, cardID: card.id, year: year, month: month)
                 guard !items.isEmpty else { return nil }
                 return InvoiceSummary(
                     card: card,
@@ -229,7 +233,7 @@ public struct DashboardView: View {
     // MARK: - Orçamentos do mês (atalho para a lista completa)
 
     private var budgetRows: [BudgetService.Row] {
-        BudgetService.rows(limits: store.budgets, transactions: store.transactions, year: year, month: month)
+        BudgetService.rows(limits: store.budgets, transactions: store.visibleTransactions, year: year, month: month)
             .sorted { $0.percent > $1.percent }
     }
 

@@ -93,6 +93,32 @@ public enum MetricsService {
 }
 
 /// Regras de fundos e orçamentos (puras, testáveis).
+public enum AccountService {
+    /// Saldo = inicial + recebidas baixadas − pagas baixadas.
+    /// Pendentes não entram (são previsão); canceladas nunca compõem.
+    public static func balance(account: BankAccount, transactions: [FinancialTransaction]) -> Decimal {
+        var bal = account.initialBalance
+        for t in transactions where t.accountID == account.id && t.status == .paid {
+            if t.type == .receivable { bal += t.amount } else { bal -= t.amount }
+        }
+        return bal
+    }
+
+    /// Saldos de todas as contas em passe único.
+    public static func balances(accounts: [BankAccount], transactions: [FinancialTransaction]) -> [String: Decimal] {
+        var deltas: [String: Decimal] = [:]
+        for t in transactions where t.status == .paid {
+            guard let id = t.accountID else { continue }
+            deltas[id, default: 0] += (t.type == .receivable ? t.amount : -t.amount)
+        }
+        var out: [String: Decimal] = [:]
+        for account in accounts {
+            out[account.id] = account.initialBalance + (deltas[account.id] ?? 0)
+        }
+        return out
+    }
+}
+
 public enum FundService {
     public static func balance(fund: Fund, transactions: [FinancialTransaction]) -> Decimal {
         let moves = transactions.filter { $0.fundID == fund.id && $0.status != .canceled }
