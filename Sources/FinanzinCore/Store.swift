@@ -87,11 +87,15 @@ public final class Store: ObservableObject {
         wishlistItems = []
         categories = []
         attachments = []
-        // Remove os arquivos dos comprovantes (metadados já zerados acima).
-        if let urls = try? FileManager.default.contentsOfDirectory(
-            at: attachmentsDir, includingPropertiesForKeys: nil)
-        {
-            for url in urls { try? FileManager.default.removeItem(at: url) }
+        // Remove os arquivos dos comprovantes em background (metadados já
+        // zerados acima); o `save()` com debounce persiste o snapshot.
+        let dir = attachmentsDir
+        persistQueue.async {
+            if let urls = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil)
+            {
+                for url in urls { try? FileManager.default.removeItem(at: url) }
+            }
         }
         Seed.apply(to: self)
     }
@@ -237,7 +241,9 @@ public final class Store: ObservableObject {
             doomed.insert(t.id)
         }
         transactions.removeAll { doomed.contains($0.id) }
-        // Cascata: comprovantes das removidas (metadados + arquivos).
+        // Cascata: comprovantes das removidas. `unlink` é síncrono e barato
+        // (garante "apagou, sumiu" p/ UI e testes); o snapshot JSON vai
+        // com debounce em background via `save()`.
         let doomedAttachments = attachments.filter { doomed.contains($0.transactionID) }
         attachments.removeAll { doomed.contains($0.transactionID) }
         for att in doomedAttachments {
@@ -425,7 +431,7 @@ public final class Store: ObservableObject {
     public func addFund(name: String, initialAmount: Decimal, color: String, icon: String, notes: String?) throws -> Fund {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw FundError.emptyName }
-        guard (initialAmount as NSDecimalNumber).doubleValue >= 0 else { throw FundError.invalidAmount }
+        guard initialAmount >= 0 else { throw FundError.invalidAmount }
         let fund = Fund(name: trimmed, initialAmount: initialAmount, color: color, icon: icon, notes: notes?.isEmpty == true ? nil : notes)
         funds.append(fund)
         save()
@@ -435,7 +441,7 @@ public final class Store: ObservableObject {
     public func updateFund(_ fund: Fund) throws {
         let trimmed = fund.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw FundError.emptyName }
-        guard (fund.initialAmount as NSDecimalNumber).doubleValue >= 0 else { throw FundError.invalidAmount }
+        guard fund.initialAmount >= 0 else { throw FundError.invalidAmount }
         guard let i = funds.firstIndex(where: { $0.id == fund.id }) else { return }
         var copy = fund
         copy.name = trimmed
@@ -472,10 +478,10 @@ public final class Store: ObservableObject {
         guard let fund = funds.first(where: { $0.id == fundID }) else { throw FundError.fundNotFound }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw FundError.emptyName }
-        guard (amount as NSDecimalNumber).doubleValue > 0 else { throw FundError.invalidAmount }
+        guard amount > 0 else { throw FundError.invalidAmount }
         if movement == .withdrawal {
-            let bal = (FundService.balance(fund: fund, transactions: transactions) as NSDecimalNumber).doubleValue
-            guard (amount as NSDecimalNumber).doubleValue <= bal else { throw FundError.insufficientBalance }
+            let bal = FundService.balance(fund: fund, transactions: transactions)
+            guard amount <= bal else { throw FundError.insufficientBalance }
         }
         let items = create(TransactionEngine.CreateInput(
             description: trimmed, type: .payable, amount: amount,
@@ -502,7 +508,7 @@ public final class Store: ObservableObject {
         guard let categoryID, !categoryID.isEmpty,
               categories.contains(where: { $0.id == categoryID })
         else { throw BudgetError.categoryRequired }
-        guard (limitAmount as NSDecimalNumber).doubleValue > 0 else { throw BudgetError.invalidAmount }
+        guard limitAmount > 0 else { throw BudgetError.invalidAmount }
         if isRecurring {
             if let i = budgets.firstIndex(where: { $0.categoryID == categoryID && $0.isRecurring }) {
                 budgets[i].limitAmount = limitAmount
@@ -534,7 +540,7 @@ public final class Store: ObservableObject {
 
     /// Atualiza valor e recorrência de um limite existente (usado na edição).
     public func updateBudget(id: String, limitAmount: Decimal, isRecurring: Bool) throws {
-        guard (limitAmount as NSDecimalNumber).doubleValue > 0 else { throw BudgetError.invalidAmount }
+        guard limitAmount > 0 else { throw BudgetError.invalidAmount }
         guard let i = budgets.firstIndex(where: { $0.id == id }) else { return }
         budgets[i].limitAmount = limitAmount
         budgets[i].isRecurring = isRecurring
@@ -603,7 +609,7 @@ public final class Store: ObservableObject {
         guard wishlists.contains(where: { $0.id == wishlistID }) else { throw WishlistError.listNotFound }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw WishlistError.emptyName }
-        guard (price as NSDecimalNumber).doubleValue > 0 else { throw WishlistError.invalidPrice }
+        guard price > 0 else { throw WishlistError.invalidPrice }
         let item = WishlistItem(
             wishlistID: wishlistID, name: trimmed, estimatedPrice: price,
             priority: priority, categoryID: categoryID,
@@ -617,7 +623,7 @@ public final class Store: ObservableObject {
     public func updateItem(_ item: WishlistItem) throws {
         let trimmed = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw WishlistError.emptyName }
-        guard (item.estimatedPrice as NSDecimalNumber).doubleValue > 0 else { throw WishlistError.invalidPrice }
+        guard item.estimatedPrice > 0 else { throw WishlistError.invalidPrice }
         guard let i = wishlistItems.firstIndex(where: { $0.id == item.id }) else { return }
         var copy = item
         copy.name = trimmed
@@ -641,7 +647,7 @@ public final class Store: ObservableObject {
         wishlistItems.filter { $0.wishlistID == wishlistID }.sorted {
             if $0.purchased != $1.purchased { return !$0.purchased }
             if $0.priority != $1.priority { return rank($0.priority) > rank($1.priority) }
-            return ($0.estimatedPrice as NSDecimalNumber).doubleValue > ($1.estimatedPrice as NSDecimalNumber).doubleValue
+            return $0.estimatedPrice > $1.estimatedPrice
         }
     }
 
@@ -675,7 +681,39 @@ public final class Store: ObservableObject {
     }
 
     public func attachmentCount(for transactionID: String) -> Int {
-        attachments.reduce(0) { $0 + ($1.transactionID == transactionID ? 1 : 0) }
+        attachmentCounts()[transactionID] ?? 0
+    }
+
+    /// Contagem de anexos por transação em passe único — passe o mapa para
+    /// as linhas em vez de chamar `attachmentCount(for:)` por linha (O(A)
+    /// por linha → O(N*A) na lista).
+    public func attachmentCounts() -> [String: Int] {
+        var out: [String: Int] = [:]
+        for att in attachments { out[att.transactionID, default: 0] += 1 }
+        return out
+    }
+
+    /// Saldos de todos os fundos em 2 varreduras (antes: `balance(of:)`
+    /// filtrava tudo por fundo → O(F*n) nos cards).
+    public func fundBalances() -> [String: Decimal] {
+        var moves: [String: Decimal] = [:]
+        var withdrawals: [String: Decimal] = [:]
+        for t in transactions where t.fundID != nil && t.status != .canceled {
+            let id = t.fundID ?? ""
+            switch t.fundMovementType {
+            case .withdrawal: withdrawals[id, default: 0] += t.amount
+            case .application: moves[id, default: 0] += t.amount
+            case nil:
+                // Compat: payable vinculada sem tipo = aplicação.
+                if t.type == .payable { moves[id, default: 0] += t.amount }
+            }
+        }
+        var out: [String: Decimal] = [:]
+        for fund in funds {
+            out[fund.id] = fund.initialAmount
+                + (moves[fund.id] ?? 0) - (withdrawals[fund.id] ?? 0)
+        }
+        return out
     }
 
     /// URL do arquivo em disco (para preview/compartilhar), se existir.
@@ -717,7 +755,7 @@ public final class Store: ObservableObject {
         return attachment
     }
 
-    /// Remove um comprovante (metadado + arquivo).
+    /// Remove um comprovante (`unlink` síncrono; snapshot via `save()`).
     public func removeAttachment(id: String) {
         guard let att = attachments.first(where: { $0.id == id }) else { return }
         attachments.removeAll { $0.id == id }
@@ -728,6 +766,10 @@ public final class Store: ObservableObject {
 
     // MARK: - Persistência JSON
 
+    /// Fila serial p/ IO de persistência (fora da main) + debounce.
+    private let persistQueue = DispatchQueue(label: "finanzin.store.persist", qos: .utility)
+    private var pendingSave: DispatchWorkItem?
+    private let pendingSaveLock = NSLock()
     private struct Snapshot: Codable {
         var categories: [FinanceCategory]
         var transactions: [FinancialTransaction]
@@ -774,6 +816,11 @@ public final class Store: ObservableObject {
         }
     }
 
+    /// Agenda a gravação do snapshot com debounce (250ms) numa fila de
+    /// background — mutações na UI não bloqueiam o próximo frame. Captura o
+    /// snapshot na hora da chamada (CoW, barato); encode + write fora da main.
+    /// Testes que precisam do arquivo em disco na sequência devem chamar
+    /// `flush()` após mutar.
     public func save() {
         guard let url = fileURL else { return }
         let snap = Snapshot(
@@ -782,6 +829,32 @@ public final class Store: ObservableObject {
             budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
             attachments: attachments
         )
+        pendingSaveLock.lock()
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { Self.write(snap, to: url) }
+        pendingSave = work
+        pendingSaveLock.unlock()
+        persistQueue.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    /// Grava imediatamente (cancela o debounce pendente). Uso: testes e
+    /// `scenePhase(.background)` — garante o arquivo antes de suspender.
+    public func flush() {
+        guard let url = fileURL else { return }
+        pendingSaveLock.lock()
+        pendingSave?.cancel()
+        pendingSave = nil
+        pendingSaveLock.unlock()
+        let snap = Snapshot(
+            categories: categories, transactions: transactions,
+            creditCards: creditCards, funds: funds,
+            budgets: budgets, wishlists: wishlists, wishlistItems: wishlistItems,
+            attachments: attachments
+        )
+        Self.write(snap, to: url)
+    }
+
+    private static func write(_ snap: Snapshot, to url: URL) {
         do {
             let data = try JSONEncoder().encode(snap)
             try data.write(to: url, options: .atomic)

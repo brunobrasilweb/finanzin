@@ -14,6 +14,7 @@ public struct RootTabView: View {
     @State private var showAISheet = false
     @State private var showBudgetForm = false
     @State private var showWishlistForm = false
+    @State private var rescheduleWork: DispatchWorkItem?
 
     public init(store: Store? = nil) {
         // No app iOS, persiste em Application Support; demo/previews injetam Store() em memória.
@@ -56,14 +57,15 @@ public struct RootTabView: View {
             bottomDock
             #else
             // macOS mantém o botão flutuante sobre as abas do sistema.
+            // Cores via tokens (segue light/dark em vez de `.white`/`.black`).
             Button(action: fabTap) {
                 Image(systemName: "plus")
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(VercelTheme.bg)
                     .frame(width: 60, height: 60)
-                    .background(Color.white)
+                    .background(VercelTheme.accent)
                     .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                    .shadow(color: VercelTheme.shadow, radius: 10, y: 4)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(store.t(.add))
@@ -128,11 +130,18 @@ public struct RootTabView: View {
         showTxForm = true
     }
 
-    /// Reagenda as notificações locais a cada mudança relevante.
+    /// Reagenda as notificações com debounce: cada tecla/mutação em série
+    /// reagendava tudo de forma síncrona na main (`onChange` de
+    /// `transactions`/`settings`). Agora coalesce em 0.5s.
     private func reschedule() {
-        #if canImport(UserNotifications)
-        NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
-        #endif
+        rescheduleWork?.cancel()
+        let work = DispatchWorkItem {
+            #if canImport(UserNotifications)
+            NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+            #endif
+        }
+        rescheduleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     /// Ação do + central: abre o cadastro da aba atual
@@ -180,11 +189,11 @@ public struct RootTabView: View {
             Button(action: fabTap) {
                 Image(systemName: "plus")
                     .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(VercelTheme.bg)
                     .frame(width: 56, height: 56)
-                    .background(Color.white)
+                    .background(VercelTheme.accent)
                     .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                    .shadow(color: VercelTheme.shadow, radius: 10, y: 4)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(store.t(.add))

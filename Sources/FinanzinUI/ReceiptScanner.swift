@@ -249,32 +249,36 @@ public struct ReceiptScanSheet: View {
 
 struct ScanImagePreview: View {
     let data: Data
+    @State private var thumb: ThumbImage?
+    @State private var failed = false
 
     var body: some View {
         Group {
-            #if os(iOS)
-            if let ui = UIImage(data: data) {
-                Image(uiImage: ui)
+            if let thumb {
+                thumb.image
                     .resizable()
                     .scaledToFit()
-            } else {
+            } else if failed {
                 Image(systemName: "photo")
                     .font(.largeTitle)
                     .foregroundStyle(VercelTheme.textTertiary)
-            }
-            #else
-            if let ns = NSImage(data: data) {
-                Image(nsImage: ns)
-                    .resizable()
-                    .scaledToFit()
             } else {
-                Image(systemName: "photo")
-                    .font(.largeTitle)
-                    .foregroundStyle(VercelTheme.textTertiary)
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 120)
             }
-            #endif
         }
         .frame(maxHeight: 220)
         .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+        // Decode + downsample em background (antes: `UIImage(data:)` full-res
+        // no `body`, re-decodificado a cada `isReading` flip).
+        .task(id: data.count) {
+            if let loaded = await ThumbnailCache.shared.thumb(
+                id: "scan-\(data.count)", data: data, url: nil, maxPixels: 800)
+            {
+                thumb = loaded
+            } else {
+                failed = true
+            }
+        }
     }
 }

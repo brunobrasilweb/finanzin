@@ -733,6 +733,7 @@ func testAttachmentSnapshotRoundTrip() {
     let items = store.create(.init(
         description: "Aluguel", type: .payable, amount: 1500, dueDate: D(2026, 10, 5)))
     _ = try! store.addAttachment(to: items[0].id, fileName: "recibo.jpg", data: Data([0x09, 0x08]))
+    store.flush() // `save()` é debounced em background: grava antes de reabrir.
     let reopened = Store(persistTo: json, seedIfEmpty: false, attachmentsDirectory: dir)
     check(reopened.attachments.count == 1, "metadado sobrevive ao JSON")
     check(reopened.attachments[0].transactionID == items[0].id, "vínculo preservado")

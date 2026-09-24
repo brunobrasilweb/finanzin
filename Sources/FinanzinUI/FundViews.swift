@@ -18,6 +18,15 @@ public struct FundListView: View {
 
     public var body: some View {
         NavigationStack {
+            // Saldos e contagens uma vez por `body` (antes: por linha,
+            // cada uma varrendo todas as transações → O(F*n)).
+            let balances = store.fundBalances()
+            let counts = Dictionary(grouping: store.transactions.compactMap(\.fundID), by: { $0 })
+                .mapValues(\.count)
+            let currencyCode = store.settings.currency.currencyCode
+            let localeID = store.settings.currency.localeIdentifier
+            let hidden = store.valuesHidden
+            let funds = store.funds.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.funds)) {
                     if showClose {
@@ -26,7 +35,7 @@ public struct FundListView: View {
                     PrivacyEyeButton()
                     HeaderButton("plus") { showingForm = true }
                 }
-                if store.funds.isEmpty {
+                if funds.isEmpty {
                     EmptyStateView(
                         title: store.t(.fundEmptyTitle),
                         subtitle: store.t(.fundEmptySubtitle),
@@ -34,8 +43,14 @@ public struct FundListView: View {
                     )
                 } else {
                     List {
-                        ForEach(store.funds.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }) { fund in
-                            card(fund)
+                        ForEach(funds) { fund in
+                            FundCardRow(
+                                icon: fund.icon,
+                                tintHex: fund.color,
+                                title: fund.name,
+                                movementsText: String(format: store.t(.fundMovementsCount), counts[fund.id] ?? 0),
+                                balanceText: hidden ? "••••••" : Currency.format(balances[fund.id] ?? fund.initialAmount, currencyCode: currencyCode, localeIdentifier: localeID)
+                            )
                                 .finCleanRow()
                                 .padding(.vertical, 2)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -82,24 +97,32 @@ public struct FundListView: View {
             }
         }
     }
+}
 
-    private func card(_ fund: Fund) -> some View {
+// MARK: - Linha estreita do fundo (só `let`s)
+
+struct FundCardRow: View {
+    let icon: String
+    let tintHex: String
+    let title: String
+    let movementsText: String
+    let balanceText: String
+
+    var body: some View {
         HStack(spacing: FinSpacing.md) {
-            TintedIcon(fund.icon, tint: VercelTheme.hex(fund.color), size: 44)
+            TintedIcon(icon, tint: VercelTheme.hex(tintHex), size: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(fund.name)
+                Text(title)
                     .font(.subheadline.bold())
                     .foregroundStyle(VercelTheme.textPrimary)
-                Text(String(format: store.t(.fundMovementsCount), store.fundTransactions(fundID: fund.id).count))
+                Text(movementsText)
                     .font(.caption).foregroundStyle(VercelTheme.textSecondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                AmountText(
-                    store.balance(of: fund.id) ?? fund.initialAmount, style: .subheadline, hidden: store.valuesHidden,
-                    currencyCode: store.settings.currency.currencyCode,
-                    localeIdentifier: store.settings.currency.localeIdentifier
-                )
+                Text(balanceText)
+                    .font(.subheadline.bold()).monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
                 Image(systemName: "chevron.right")
                     .font(.caption2.bold())
                     .foregroundStyle(VercelTheme.textTertiary)
@@ -252,26 +275,19 @@ public struct FundDetailView: View {
                             .foregroundStyle(VercelTheme.textTertiary)
                             .textCase(.uppercase)
                     ) {
-                        ForEach(store.fundTransactions(fundID: fund.id)) { t in
-                            HStack(spacing: FinSpacing.md) {
-                                TintedIcon(
-                                    t.fundMovementType == .withdrawal ? "arrow.down.to.line" : "chart.line.uptrend.xyaxis",
-                                    tint: t.fundMovementType == .withdrawal ? .orange : .green,
-                                    size: 34
-                                )
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.description)
-                                        .font(.subheadline.bold())
-                                        .foregroundStyle(VercelTheme.textPrimary)
-                                        .lineLimit(1)
-                                    Text(Format.shortDate(t.dueDate, localeIdentifier: store.lang.localeIdentifier)).font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                                }
-                                Spacer()
-                                Text(store.valuesHidden ? "••••••" : "\(t.fundMovementType == .withdrawal ? "−" : "+")\(Format.currency(t.amount, currencyCode: store.settings.currency.currencyCode, localeIdentifier: store.settings.currency.localeIdentifier))")
-                                    .font(.subheadline.bold())
-                                    .monospacedDigit()
-                                    .foregroundStyle(t.fundMovementType == .withdrawal ? .orange : .green)
-                            }
+                        let moves = store.fundTransactions(fundID: fund.id)
+                        let localeID = store.lang.localeIdentifier
+                        let currencyCode = store.settings.currency.currencyCode
+                        let hidden = store.valuesHidden
+                        ForEach(moves) { t in
+                            let isWithdrawal = t.fundMovementType == .withdrawal
+                            FundMovementRow(
+                                icon: isWithdrawal ? "arrow.down.to.line" : "chart.line.uptrend.xyaxis",
+                                isWithdrawal: isWithdrawal,
+                                title: t.description,
+                                dateText: Format.shortDate(t.dueDate, localeIdentifier: localeID),
+                                amountText: hidden ? "••••••" : "\(isWithdrawal ? "−" : "+")\(Format.currency(t.amount, currencyCode: currencyCode, localeIdentifier: localeID))"
+                            )
                             .finCleanRow()
                             .padding(.vertical, 2)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -321,6 +337,36 @@ public struct FundDetailView: View {
         }
         .finBackground()
         .finDetailChrome()
+    }
+}
+
+struct FundMovementRow: View {
+    let icon: String
+    let isWithdrawal: Bool
+    let title: String
+    let dateText: String
+    let amountText: String
+
+    var body: some View {
+        HStack(spacing: FinSpacing.md) {
+            TintedIcon(
+                icon,
+                tint: isWithdrawal ? .orange : .green,
+                size: 34
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Text(dateText).font(.caption).foregroundStyle(VercelTheme.textTertiary)
+            }
+            Spacer()
+            Text(amountText)
+                .font(.subheadline.bold())
+                .monospacedDigit()
+                .foregroundStyle(isWithdrawal ? .orange : .green)
+        }
     }
 }
 

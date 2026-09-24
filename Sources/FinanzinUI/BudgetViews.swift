@@ -17,13 +17,17 @@ public struct BudgetListView: View {
 
     public var body: some View {
         NavigationStack {
+            // `rows` uma vez por `body` + mapas p/ linhas (antes: `rows`
+            // rodava 3x e cada linha re-resolvia categoria/formatos).
+            let items = rows
+            let cats = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.budgets)) {
                     PrivacyEyeButton()
                 }
                 MonthPicker(year: $year, month: $month, localeIdentifier: store.lang.localeIdentifier)
                     .padding(.horizontal, FinSpacing.lg)
-                if rows.isEmpty {
+                if items.isEmpty {
                     EmptyStateView(
                         title: store.t(.budEmptyTitle),
                         subtitle: store.t(.budEmptySubtitle),
@@ -32,7 +36,13 @@ public struct BudgetListView: View {
                 } else {
                     List {
                         Section {
-                            totalsCard
+                            BudgetTotalsCard(
+                                limitText: store.maskedAmount(items.reduce(Decimal(0)) { $0 + $1.limit.limitAmount }),
+                                usedText: store.maskedAmount(items.reduce(Decimal(0)) { $0 + $1.used }),
+                                isOver: items.reduce(Decimal(0)) { $0 + $1.used } > items.reduce(Decimal(0)) { $0 + $1.limit.limitAmount },
+                                limitTitle: store.t(.budTotalLimit),
+                                usedTitle: store.t(.budUsed)
+                            )
                                 .finCleanRow()
                                 .listRowSeparator(.hidden)
                         }
@@ -42,8 +52,27 @@ public struct BudgetListView: View {
                                 .foregroundStyle(VercelTheme.textTertiary)
                                 .textCase(.uppercase)
                         ) {
-                            ForEach(rows, id: \.limit.id) { row in
-                                budgetRow(row)
+                            ForEach(items, id: \.limit.id) { row in
+                                BudgetRow(
+                                    icon: cats[row.limit.categoryID]?.icon ?? "tag",
+                                    tintHex: cats[row.limit.categoryID]?.color ?? "#64748b",
+                                    title: cats[row.limit.categoryID]?.name ?? store.t(.dashNoCategory),
+                                    isRecurring: row.limit.isRecurring,
+                                    recurringText: store.t(.budMonthly),
+                                    detailText: String(
+                                        format: store.t(.budOfTemplate),
+                                        store.maskedAmount(row.used), store.maskedAmount(row.limit.limitAmount)
+                                    ),
+                                    percentText: row.isOver ? store.t(.budOverShort) : "\(Int(row.percent))%",
+                                    percentPill: row.isOver || row.isWarning,
+                                    pillColor: row.isOver ? .red : .orange,
+                                    fraction: row.percent / 100,
+                                    barColor: row.isOver ? .red : (row.isWarning ? .orange : .green),
+                                    statusText: row.isOver
+                                        ? String(format: store.t(.budOverBy), store.maskedAmount(row.used - row.limit.limitAmount))
+                                        : String(format: store.t(.budLeft), store.maskedAmount(row.remaining)),
+                                    isOver: row.isOver
+                                )
                                     .finCleanRow()
                                     .padding(.vertical, 2)
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -80,39 +109,65 @@ public struct BudgetListView: View {
             .sorted { $0.percent > $1.percent }
     }
 
-    private var totalsCard: some View {
-        let totalLimit = rows.reduce(Decimal(0)) { $0 + $1.limit.limitAmount }
-        let totalUsed = rows.reduce(Decimal(0)) { $0 + $1.used }
-        return HStack(spacing: FinSpacing.lg) {
+    private func monthName(_ m: Int) -> String {
+        Dates.monthName(m, localeIdentifier: store.lang.localeIdentifier)
+    }
+}
+
+// MARK: - Linhas estreitas (só `let`s)
+
+struct BudgetTotalsCard: View {
+    let limitText: String
+    let usedText: String
+    let isOver: Bool
+    let limitTitle: String
+    let usedTitle: String
+
+    var body: some View {
+        HStack(spacing: FinSpacing.lg) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.t(.budTotalLimit)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(store.maskedAmount(totalLimit))
+                Text(limitTitle).font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(limitText)
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(store.t(.budUsed)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(store.maskedAmount(totalUsed))
+                Text(usedTitle).font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(usedText)
                     .font(.headline).monospacedDigit()
-                    .foregroundStyle(totalUsed > totalLimit ? .red : VercelTheme.textPrimary)
+                    .foregroundStyle(isOver ? .red : VercelTheme.textPrimary)
             }
         }
     }
+}
 
-    private func budgetRow(_ row: BudgetService.Row) -> some View {
-        let cat = store.category(id: row.limit.categoryID)
-        let barColor: Color = row.isOver ? .red : row.isWarning ? .orange : .green
-        return VStack(alignment: .leading, spacing: FinSpacing.sm) {
+struct BudgetRow: View {
+    let icon: String
+    let tintHex: String
+    let title: String
+    let isRecurring: Bool
+    let recurringText: String
+    let detailText: String
+    let percentText: String
+    let percentPill: Bool
+    let pillColor: Color
+    let fraction: Double
+    let barColor: Color
+    let statusText: String
+    let isOver: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: FinSpacing.sm) {
             HStack(spacing: FinSpacing.md) {
-                TintedIcon(cat?.icon ?? "tag", tint: VercelTheme.hex(cat?.color ?? "#64748b"), size: 36)
+                TintedIcon(icon, tint: VercelTheme.hex(tintHex), size: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(cat?.name ?? store.t(.dashNoCategory))
+                        Text(title)
                             .font(.subheadline.bold())
                             .foregroundStyle(VercelTheme.textPrimary)
-                        if row.limit.isRecurring {
-                            Text(store.t(.budMonthly))
+                        if isRecurring {
+                            Text(recurringText)
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
@@ -121,41 +176,21 @@ public struct BudgetListView: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    Text(String(
-                        format: store.t(.budOfTemplate),
-                        store.maskedAmount(row.used), store.maskedAmount(row.limit.limitAmount)
-                    ))
+                    Text(detailText)
                         .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 }
                 Spacer()
-                if row.isOver {
-                    StatusPill(store.t(.budOverShort), color: .red)
-                } else if row.isWarning {
-                    StatusPill("\(Int(row.percent))%", color: .orange)
+                if percentPill {
+                    StatusPill(percentText, color: pillColor)
                 } else {
-                    Text("\(Int(row.percent))%")
+                    Text(percentText)
                         .font(.caption.bold()).foregroundStyle(VercelTheme.textTertiary)
                 }
             }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(VercelTheme.track)
-                        .frame(height: 10)
-                    LinearGradient(
-                        colors: [barColor.opacity(0.7), barColor],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .frame(width: max(geo.size.width * min(row.percent / 100, 1), row.percent > 0 ? 10 : 0), height: 10)
-                }
-            }
-            .frame(height: 10)
-            Text(row.isOver
-                ? String(format: store.t(.budOverBy), store.maskedAmount(row.used - row.limit.limitAmount))
-                : String(format: store.t(.budLeft), store.maskedAmount(row.remaining)))
+            FinProgressBar(fraction: fraction, color: barColor)
+            Text(statusText)
                 .font(.caption)
-                .foregroundStyle(row.isOver ? .red : VercelTheme.textSecondary)
+                .foregroundStyle(isOver ? .red : VercelTheme.textSecondary)
         }
     }
 }
@@ -251,9 +286,7 @@ public struct BudgetFormView: View {
     }
 
     private func monthName(_ m: Int) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: store.lang.localeIdentifier)
-        return f.monthSymbols[m - 1].capitalized
+        Dates.monthName(m, localeIdentifier: store.lang.localeIdentifier)
     }
 
     private func save() {

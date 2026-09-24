@@ -76,7 +76,7 @@ public struct AIRegistrationSheet: View {
                 }
                 if !errors.isEmpty {
                     Section {
-                        ForEach(errors, id: \.self) { e in
+                        ForEach(Array(errors.enumerated()), id: \.offset) { _, e in
                             Text(e).foregroundStyle(.red)
                         }
                     }

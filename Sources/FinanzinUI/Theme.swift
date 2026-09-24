@@ -110,15 +110,30 @@ public enum VercelTheme {
         )
     }
 
+    nonisolated(unsafe) private static var hexCache: [String: Color] = [:]
+    private static let hexLock = NSLock()
+
+    /// Cacheado: `Scanner` + parse por linha no `body` viravam custo por row.
     public static func hex(_ hex: String) -> Color {
-        var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = hex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        hexLock.lock()
+        if let hit = hexCache[key] {
+            hexLock.unlock()
+            return hit
+        }
+        hexLock.unlock()
+        var h = key
         h = h.replacingOccurrences(of: "#", with: "")
         var rgb: UInt64 = 0
         Scanner(string: h).scanHexInt64(&rgb)
         let r = Double((rgb >> 16) & 0xFF) / 255
         let g = Double((rgb >> 8) & 0xFF) / 255
         let b = Double(rgb & 0xFF) / 255
-        return Color(red: r, green: g, blue: b)
+        let color = Color(red: r, green: g, blue: b)
+        hexLock.lock()
+        hexCache[key] = color
+        hexLock.unlock()
+        return color
     }
 }
 
@@ -278,7 +293,7 @@ public struct AmountText: View {
         Text(hidden ? "••••••" : Format.currency(value, currencyCode: currencyCode, localeIdentifier: localeIdentifier))
             .font(style.bold())
             .monospacedDigit()
-            .foregroundStyle((value as NSDecimalNumber).doubleValue >= 0 ? VercelTheme.textPrimary : Color.red.opacity(0.9))
+            .foregroundStyle(value >= 0 ? VercelTheme.textPrimary : Color.red.opacity(0.9))
     }
 }
 
@@ -364,11 +379,7 @@ public struct MonthPicker: View {
     }
 
     private var label: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: localeIdentifier)
-        f.dateFormat = "MMMM yyyy"
-        let d = Calendar.current.date(from: DateComponents(year: year, month: month, day: 1)) ?? Date()
-        return f.string(from: d).capitalized
+        "\(Dates.monthName(month, localeIdentifier: localeIdentifier)) \(year)"
     }
 
     private func shift(by offset: Int) {
@@ -430,6 +441,44 @@ public struct StatusPill: View {
             .foregroundStyle(color)
             .clipShape(Capsule())
             .overlay(Capsule().stroke(color.opacity(0.3), lineWidth: 0.5))
+    }
+}
+
+/// Barra de progresso sem `GeometryReader`: o preenchimento ocupa a largura
+/// total e é recortado por `scaleEffect(x:anchor:)` — evita um proposer de
+/// layout por linha nas listas (orçamento, dashboard).
+public struct FinProgressBar: View {
+    let fraction: Double
+    let color: Color
+    var height: CGFloat = 10
+    var minVisibleWidth: CGFloat = 10
+
+    public init(fraction: Double, color: Color, height: CGFloat = 10, minVisibleWidth: CGFloat = 10) {
+        self.fraction = fraction
+        self.color = color
+        self.height = height
+        self.minVisibleWidth = minVisibleWidth
+    }
+
+    public var body: some View {
+        let clamped = min(max(fraction, 0), 1)
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+                .fill(VercelTheme.track)
+                .frame(height: height)
+            if clamped > 0 {
+                LinearGradient(
+                    colors: [color.opacity(0.7), color],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .scaleEffect(x: clamped, anchor: .leading)
+                .opacity(clamped < 0.02 ? 0.5 : 1)
+            }
+        }
+        .frame(height: height)
     }
 }
 
@@ -528,9 +577,26 @@ public enum Format {
     }
 
     public static func shortDate(_ date: Date, localeIdentifier: String) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: localeIdentifier)
-        f.dateFormat = "dd/MM/yy"
+        Dates.shortDate(date, localeIdentifier: localeIdentifier)
+    }
+
+    nonisolated(unsafe) private static var shortStyleCache: [String: DateFormatter] = [:]
+    private static let shortStyleLock = NSLock()
+
+    /// `dateStyle: .short` cacheado por locale (linhas de anexo).
+    public static func shortStyle(_ date: Date, localeIdentifier: String) -> String {
+        shortStyleLock.lock()
+        let f: DateFormatter
+        if let hit = shortStyleCache[localeIdentifier] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.locale = Locale(identifier: localeIdentifier)
+            fresh.dateStyle = .short
+            shortStyleCache[localeIdentifier] = fresh
+            f = fresh
+        }
+        shortStyleLock.unlock()
         return f.string(from: date)
     }
 }
@@ -538,9 +604,8 @@ public enum Format {
 // MARK: - Aparência (Sprint 7: ThemeMode do Core → SwiftUI)
 //
 // O Core não importa SwiftUI (não resolve no CLT), então o mapeamento
-// `ThemeMode → ColorScheme` vive aqui. Nota: os tokens `VercelTheme`
-// são dark-hardcoded; no modo claro o fundo segue escuro até existirem
-// tokens light (issue futura) — o `system` default preserva o visual atual.
+// `ThemeMode → ColorScheme` vive aqui. Os tokens `VercelTheme` acima são
+// adaptativos (light/dark via providers).
 
 public extension ThemeMode {
     var colorScheme: ColorScheme? {
@@ -624,9 +689,6 @@ public struct FormDateField: View {
     }
 
     static func label(for date: Date, localeIdentifier: String) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: localeIdentifier)
-        f.dateStyle = .short
-        return f.string(from: date)
+        Format.shortStyle(date, localeIdentifier: localeIdentifier)
     }
 }

@@ -1,12 +1,25 @@
 import Foundation
 
 public enum Currency {
+    nonisolated(unsafe) private static var cache: [String: NumberFormatter] = [:]
+    private static let cacheLock = NSLock()
+
     /// Formatter parametrizado (Sprint 7: moeda configurável).
+    /// Cacheado por (currencyCode, locale): `NumberFormatter` é caro para
+    /// criar e `maskedAmount`/`AmountText` o chamam por linha no `body`.
     public static func formatter(currencyCode: String, localeIdentifier: String) -> NumberFormatter {
+        let key = "\(currencyCode)|\(localeIdentifier)"
+        cacheLock.lock()
+        if let hit = cache[key] {
+            cacheLock.unlock()
+            return hit
+        }
         let f = NumberFormatter()
         f.locale = Locale(identifier: localeIdentifier)
         f.numberStyle = .currency
         f.currencyCode = currencyCode
+        cache[key] = f
+        cacheLock.unlock()
         return f
     }
 

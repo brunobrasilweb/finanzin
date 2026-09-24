@@ -23,34 +23,35 @@ public struct DashboardView: View {
 
     public var body: some View {
         NavigationStack {
-            GeometryReader { geo in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: FinSpacing.md) {
-                        ScreenHeader(L10n.t(.summary, store.settings.language)) {
-                            SettingsGearButton()
-                            PrivacyEyeButton()
-                        }
-                        MonthPicker(
-                            year: $year, month: $month,
-                            localeIdentifier: store.lang.localeIdentifier
-                        )
-                        heroCard
-                        statGrid
-                        fundsCard
-                        if !store.creditCards.isEmpty {
-                            invoicesCard
-                        }
-                        if !budgetRows.isEmpty {
-                            budgetsCard
-                        }
-                        evolutionCard
-                        breakdownCard
-                        upcomingCard
+            ScrollView {
+                // `metrics` avaliado UMA vez por `body` (antes: cada card
+                // reexecutava `MetricsService.monthly` → 7 varreduras).
+                let m = metrics
+                VStack(alignment: .leading, spacing: FinSpacing.md) {
+                    ScreenHeader(L10n.t(.summary, store.settings.language)) {
+                        SettingsGearButton()
+                        PrivacyEyeButton()
                     }
-                    .padding(.horizontal, FinSpacing.lg)
-                    .padding(.bottom, FinSpacing.xl)
-                    .frame(minHeight: geo.size.height, alignment: .top)
+                    MonthPicker(
+                        year: $year, month: $month,
+                        localeIdentifier: store.lang.localeIdentifier
+                    )
+                    heroCard(m)
+                    statGrid(m)
+                    fundsCard
+                    if !store.creditCards.isEmpty {
+                        invoicesCard
+                    }
+                    if !budgetRows.isEmpty {
+                        budgetsCard
+                    }
+                    evolutionCard
+                    breakdownCard
+                    upcomingCard(m)
                 }
+                .padding(.horizontal, FinSpacing.lg)
+                .padding(.bottom, FinSpacing.xl)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
             .finBackground()
             .finHideNavBar()
@@ -88,19 +89,19 @@ public struct DashboardView: View {
 
     // MARK: - Hero de saldo
 
-    private var heroCard: some View {
+    private func heroCard(_ m: MonthlyMetrics) -> some View {
         VStack(spacing: FinSpacing.sm) {
             Text(store.t(.dashBalance))
                 .font(.caption.bold())
                 .foregroundStyle(VercelTheme.textSecondary)
                 .textCase(.uppercase)
-            Text(store.maskedAmount(metrics.balance))
+            Text(store.maskedAmount(m.balance))
                 .font(.system(size: 38, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(VercelTheme.textPrimary)
             HStack(spacing: FinSpacing.sm) {
-                heroFlow(store.t(.dashChartIncome), metrics.totalIncome, .green, icon: "arrow.down.left")
-                heroFlow(store.t(.dashChartExpense), metrics.totalExpense, .red, icon: "arrow.up.right")
+                HeroFlow(title: store.t(.dashChartIncome), valueText: store.maskedAmount(m.totalIncome), color: .green, icon: "arrow.down.left")
+                HeroFlow(title: store.t(.dashChartExpense), valueText: store.maskedAmount(m.totalExpense), color: .red, icon: "arrow.up.right")
             }
         }
         .frame(maxWidth: .infinity)
@@ -114,58 +115,25 @@ public struct DashboardView: View {
         )
     }
 
-    private func heroFlow(_ title: String, _ value: Decimal, _ color: Color, icon: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption.bold())
-                .foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.caption2).foregroundStyle(VercelTheme.textSecondary)
-                Text(store.maskedAmount(value))
-                    .font(.subheadline.bold()).monospacedDigit()
-                    .foregroundStyle(VercelTheme.textPrimary)
-            }
-        }
-        .padding(.horizontal, FinSpacing.md)
-        .padding(.vertical, FinSpacing.sm)
-        .background(VercelTheme.inset)
-        .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
-    }
-
     // MARK: - Grade secundária
 
-    private var statGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FinSpacing.sm) {
-            miniStat(store.t(.dashSavings), custom: String(format: "%.0f%%", metrics.savingsRate))
-            miniStat(store.t(.dashToReceive), value: metrics.pendingReceivable, color: .green)
-            miniStat(store.t(.dashOverdueStat), value: metrics.overdueAmount, color: metrics.overdueAmount > 0 ? .red : nil)
+    private func statGrid(_ m: MonthlyMetrics) -> some View {
+        let recvText = store.maskedAmount(m.pendingReceivable)
+        let overText = store.maskedAmount(m.overdueAmount)
+        let recvZero = m.pendingReceivable == 0
+        let overZero = m.overdueAmount == 0
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FinSpacing.sm) {
+            MiniStat(title: store.t(.dashSavings), custom: String(format: "%.0f%%", m.savingsRate))
+            MiniStat(title: store.t(.dashToReceive), valueText: recvText, dimmed: recvZero, color: .green)
+            MiniStat(title: store.t(.dashOverdueStat), valueText: overText, dimmed: overZero, color: overZero ? nil : .red)
         }
-    }
-
-    private func miniStat(_ title: String, value: Decimal? = nil, color: Color? = nil, custom: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption2).foregroundStyle(VercelTheme.textSecondary)
-            if let custom {
-                Text(custom)
-                    .font(.headline).monospacedDigit()
-                    .foregroundStyle(VercelTheme.textPrimary)
-            } else if let value {
-                let isZero = (value as NSDecimalNumber).doubleValue == 0
-                Text(store.maskedAmount(value))
-                    .font(.subheadline.bold()).monospacedDigit()
-                    .foregroundStyle(isZero ? VercelTheme.textTertiary : (color ?? VercelTheme.textPrimary))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .finCard()
     }
 
     // MARK: - Fundos (atalho para a lista completa)
 
     private var fundsTotal: Decimal {
-        store.funds.reduce(Decimal(0)) { $0 + (store.balance(of: $1.id) ?? $1.initialAmount) }
+        let balances = store.fundBalances()
+        return store.funds.reduce(Decimal(0)) { $0 + (balances[$1.id] ?? $1.initialAmount) }
     }
 
     private var fundsCard: some View {
@@ -215,12 +183,11 @@ public struct DashboardView: View {
             }
     }
 
-    private var invoicesTotal: Decimal {
-        invoiceSummaries.reduce(Decimal(0)) { $0 + $1.total }
-    }
-
     private var invoicesCard: some View {
-        Button(action: onSelectInvoices) {
+        // Avalia os resumos uma única vez por `body` (antes: 3+ varreduras).
+        let summaries = invoiceSummaries
+        let total = summaries.reduce(Decimal(0)) { $0 + $1.total }
+        return Button(action: onSelectInvoices) {
             VStack(alignment: .leading, spacing: FinSpacing.sm) {
                 HStack {
                     Image(systemName: "creditcard.fill")
@@ -229,35 +196,26 @@ public struct DashboardView: View {
                     Text(store.t(.dashInvoices))
                         .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                     Spacer()
-                    Text(store.maskedAmount(invoicesTotal))
+                    Text(store.maskedAmount(total))
                         .font(.subheadline.bold()).monospacedDigit()
                         .foregroundStyle(VercelTheme.textPrimary)
                     Image(systemName: "chevron.right")
                         .font(.caption2.bold())
                         .foregroundStyle(VercelTheme.textTertiary)
                 }
-                if invoiceSummaries.isEmpty {
+                if summaries.isEmpty {
                     Text(store.t(.dashNoMovement))
                         .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
                 } else {
-                    ForEach(invoiceSummaries.prefix(5), id: \.card.id) { summary in
-                        HStack(spacing: FinSpacing.sm) {
-                            Circle()
-                                .fill(summary.paid ? Color.green : Color.orange)
-                                .frame(width: 8, height: 8)
-                            Text(summary.card.name)
-                                .font(.subheadline)
-                                .foregroundStyle(VercelTheme.textPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(store.maskedAmount(summary.total))
-                                .font(.subheadline).monospacedDigit()
-                                .foregroundStyle(VercelTheme.textSecondary)
-                        }
-                        .padding(.vertical, 3)
+                    ForEach(Array(summaries.prefix(5)), id: \.card.id) { summary in
+                        InvoiceSummaryRow(
+                            name: summary.card.name,
+                            totalText: store.maskedAmount(summary.total),
+                            paid: summary.paid
+                        )
                     }
-                    if invoiceSummaries.count > 5 {
-                        Text(String(format: store.t(.dashOthers), invoiceSummaries.count - 5))
+                    if summaries.count > 5 {
+                        Text(String(format: store.t(.dashOthers), summaries.count - 5))
                             .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                     }
                 }
@@ -276,23 +234,45 @@ public struct DashboardView: View {
     }
 
     private var budgetsCard: some View {
-        Button(action: onSelectBudgets) {
+        // `budgetRows` avaliado uma vez; linhas recebem só strings prontas.
+        let rows = budgetRows
+        let categories = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
+        let currencyCode = store.settings.currency.currencyCode
+        let localeID = store.settings.currency.localeIdentifier
+        let hidden = store.valuesHidden
+        let noCategory = store.t(.dashNoCategory)
+        let ofTemplate = store.t(.budOfTemplate)
+        let overBy = store.t(.dashOverBy)
+        let left = store.t(.dashLeft)
+        return Button(action: onSelectBudgets) {
             VStack(alignment: .leading, spacing: FinSpacing.sm) {
                 HStack {
                     Text(store.t(.budgets))
                         .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                     Spacer()
-                    Text("\(budgetRows.count)")
+                    Text("\(rows.count)")
                         .font(.caption.bold()).foregroundStyle(VercelTheme.textTertiary)
                     Image(systemName: "chevron.right")
                         .font(.caption2.bold())
                         .foregroundStyle(VercelTheme.textTertiary)
                 }
-                ForEach(budgetRows.prefix(5), id: \.limit.id) { row in
-                    budgetLine(row)
+                ForEach(Array(rows.prefix(5)), id: \.limit.id) { row in
+                    let cat = categories[row.limit.categoryID]
+                    let usedText = hidden ? "••••••" : Currency.format(row.used, currencyCode: currencyCode, localeIdentifier: localeID)
+                    let limitText = hidden ? "••••••" : Currency.format(row.limit.limitAmount, currencyCode: currencyCode, localeIdentifier: localeID)
+                    let over = hidden ? "••••••" : Currency.format(row.used - row.limit.limitAmount, currencyCode: currencyCode, localeIdentifier: localeID)
+                    let rem = hidden ? "••••••" : Currency.format(row.remaining, currencyCode: currencyCode, localeIdentifier: localeID)
+                    BudgetLineRow(
+                        title: cat?.name ?? noCategory,
+                        colorHex: cat?.color ?? "#64748b",
+                        statusText: row.isOver ? String(format: overBy, over) : String(format: left, rem),
+                        statusColor: row.isOver ? .red : (row.isWarning ? .orange : nil),
+                        detailText: String(format: ofTemplate, usedText, limitText),
+                        fraction: row.percent / 100
+                    )
                 }
-                if budgetRows.count > 5 {
-                    Text(String(format: store.t(.dashOthers), budgetRows.count - 5))
+                if rows.count > 5 {
+                    Text(String(format: store.t(.dashOthers), rows.count - 5))
                         .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                 }
             }
@@ -300,53 +280,6 @@ public struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .finCard()
-    }
-
-    private func budgetLine(_ row: BudgetService.Row) -> some View {
-        let cat = store.category(id: row.limit.categoryID)
-        let barColor: Color = row.isOver ? .red : row.isWarning ? .orange : .green
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: FinSpacing.sm) {
-                Circle()
-                    .fill(VercelTheme.hex(cat?.color ?? "#64748b"))
-                    .frame(width: 8, height: 8)
-                Text(cat?.name ?? store.t(.dashNoCategory))
-                    .font(.subheadline)
-                    .foregroundStyle(VercelTheme.textPrimary)
-                    .lineLimit(1)
-                Spacer()
-                if row.isOver {
-                    Text(String(format: store.t(.dashOverBy), store.maskedAmount(row.used - row.limit.limitAmount)))
-                        .font(.caption.bold()).monospacedDigit()
-                        .foregroundStyle(.red)
-                } else {
-                    Text(String(format: store.t(.dashLeft), store.maskedAmount(row.remaining)))
-                        .font(.caption.bold()).monospacedDigit()
-                        .foregroundStyle(row.isWarning ? .orange : VercelTheme.textSecondary)
-                }
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(VercelTheme.track)
-                        .frame(height: 6)
-                    LinearGradient(
-                        colors: [barColor.opacity(0.7), barColor],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                    .frame(width: max(geo.size.width * min(row.percent / 100, 1), row.percent > 0 ? 8 : 0), height: 6)
-                }
-            }
-            .frame(height: 6)
-            Text(String(
-                format: store.t(.budOfTemplate),
-                store.maskedAmount(row.used), store.maskedAmount(row.limit.limitAmount)
-            ))
-                .font(.caption2)
-                .foregroundStyle(VercelTheme.textTertiary)
-        }
-        .padding(.vertical, 4)
     }
 
     // MARK: - Evolução 6 meses
@@ -367,7 +300,7 @@ public struct DashboardView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 180)
             } else {
-                Chart(evolution, id: \.label) { point in
+                Chart(evolution, id: \.stableID) { point in
                     BarMark(
                         x: .value("Mês", point.label),
                         y: .value("Valor", (point.income as NSDecimalNumber).doubleValue)
@@ -400,15 +333,18 @@ public struct DashboardView: View {
     // MARK: - Donut por categoria
 
     private var breakdownCard: some View {
-        VStack(alignment: .leading, spacing: FinSpacing.sm) {
+        // Total avaliado uma vez (antes: `breakdown` + `reduce` por acesso).
+        let items = breakdown
+        let total = items.reduce(Decimal(0)) { $0 + $1.total }
+        return VStack(alignment: .leading, spacing: FinSpacing.sm) {
             Text(store.t(.dashBreakdown))
                 .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
-            if breakdown.isEmpty {
+            if items.isEmpty {
                 Text(store.t(.dashNoExpenses))
                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
             } else {
                 HStack(spacing: FinSpacing.lg) {
-                    Chart(breakdown, id: \.categoryID) { item in
+                    Chart(items, id: \.categoryID) { item in
                         SectorMark(
                             angle: .value("Total", (item.total as NSDecimalNumber).doubleValue),
                             innerRadius: .ratio(0.64),
@@ -420,34 +356,23 @@ public struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(store.t(.dashTotal))
                             .font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                        Text(store.maskedAmount(breakdownTotal))
+                        Text(store.maskedAmount(total))
                             .font(.headline).monospacedDigit()
                             .foregroundStyle(VercelTheme.textPrimary)
-                        Text(String(format: store.t(.dashCategoriesCount), breakdown.count))
+                        Text(String(format: store.t(.dashCategoriesCount), items.count))
                             .font(.caption).foregroundStyle(VercelTheme.textTertiary)
                     }
                     Spacer()
                 }
                 Divider().background(VercelTheme.border)
-                ForEach(breakdown, id: \.categoryID) { item in
+                ForEach(items, id: \.categoryID) { item in
                     Button { onSelectCategory(item.categoryID == "none" ? nil : item.categoryID) } label: {
-                        HStack(spacing: FinSpacing.sm) {
-                            Circle().fill(VercelTheme.hex(item.categoryColor)).frame(width: 10, height: 10)
-                            Text(item.categoryName)
-                                .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(store.maskedAmount(item.total))
-                                .font(.subheadline).monospacedDigit()
-                                .foregroundStyle(VercelTheme.textSecondary)
-                            Text("\(Int(item.percentage))%")
-                                .font(.caption.bold()).foregroundStyle(VercelTheme.textTertiary)
-                                .frame(width: 42, alignment: .trailing)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.bold())
-                                .foregroundStyle(VercelTheme.textTertiary)
-                        }
-                        .padding(.vertical, 5)
+                        BreakdownRow(
+                            colorHex: item.categoryColor,
+                            name: item.categoryName,
+                            totalText: store.maskedAmount(item.total),
+                            percent: Int(item.percentage)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -457,52 +382,210 @@ public struct DashboardView: View {
         .finCard()
     }
 
-    private var breakdownTotal: Decimal {
-        breakdown.reduce(Decimal(0)) { $0 + $1.total }
-    }
-
     // MARK: - Próximos 7 dias
 
-    private var upcomingCard: some View {
-        VStack(alignment: .leading, spacing: FinSpacing.sm) {
+    private func upcomingCard(_ m: MonthlyMetrics) -> some View {
+        // Strings prontas por linha; a row recebe só `let`s (sem `store`).
+        let items = Array(upcoming.prefix(5))
+        let localeID = store.lang.localeIdentifier
+        let currencyCode = store.settings.currency.currencyCode
+        let hidden = store.valuesHidden
+        let pending = m.pendingPayable
+        return VStack(alignment: .leading, spacing: FinSpacing.sm) {
             HStack {
                 Text(store.t(.dashUpcoming7))
                     .font(.subheadline.bold()).foregroundStyle(VercelTheme.textPrimary)
                 Spacer()
-                if metrics.pendingPayable > 0 {
-                    Text(store.maskedAmount(metrics.pendingPayable))
+                if pending > 0 {
+                    Text(store.maskedAmount(pending))
                         .font(.caption.bold()).monospacedDigit()
                         .foregroundStyle(.orange)
                 }
             }
-            if upcoming.isEmpty {
+            if items.isEmpty {
                 Text(store.t(.dashNothingDue))
                     .font(.footnote).foregroundStyle(VercelTheme.textSecondary)
             } else {
-                ForEach(upcoming.prefix(5)) { t in
-                    HStack(spacing: FinSpacing.sm) {
-                        TintedIcon(
-                            t.type == .receivable ? "arrow.down.left" : "arrow.up.right",
-                            tint: t.type == .receivable ? .green : .red.opacity(0.85),
-                            size: 32
-                        )
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(t.description)
-                                .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
-                                .lineLimit(1)
-                            Text(Format.shortDate(t.dueDate, localeIdentifier: store.lang.localeIdentifier))
-                                .font(.caption).foregroundStyle(VercelTheme.textTertiary)
-                        }
-                        Spacer()
-                        Text(store.maskedAmount(t.amount))
-                            .font(.subheadline.bold()).monospacedDigit()
-                            .foregroundStyle(t.type == .receivable ? .green : VercelTheme.textPrimary)
-                    }
-                    .padding(.vertical, 3)
+                ForEach(items) { t in
+                    UpcomingRow(
+                        title: t.description,
+                        dateText: Format.shortDate(t.dueDate, localeIdentifier: localeID),
+                        amountText: hidden ? "••••••" : Currency.format(t.amount, currencyCode: currencyCode, localeIdentifier: localeID),
+                        isIncome: t.type == .receivable
+                    )
                 }
             }
         }
         .finCard()
+    }
+}
+
+// MARK: - Linhas estreitas (só `let`s: sem `@EnvironmentObject`, sem re-query)
+
+private struct HeroFlow: View {
+    let title: String
+    let valueText: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption.bold())
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption2).foregroundStyle(VercelTheme.textSecondary)
+                Text(valueText)
+                    .font(.subheadline.bold()).monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
+            }
+        }
+        .padding(.horizontal, FinSpacing.md)
+        .padding(.vertical, FinSpacing.sm)
+        .background(VercelTheme.inset)
+        .clipShape(RoundedRectangle(cornerRadius: FinRadius.md, style: .continuous))
+    }
+}
+
+private struct MiniStat: View {
+    let title: String
+    var valueText: String? = nil
+    var dimmed: Bool = false
+    var color: Color? = nil
+    var custom: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(VercelTheme.textSecondary)
+            if let custom {
+                Text(custom)
+                    .font(.headline).monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
+            } else if let valueText {
+                Text(valueText)
+                    .font(.subheadline.bold()).monospacedDigit()
+                    .foregroundStyle(dimmed ? VercelTheme.textTertiary : (color ?? VercelTheme.textPrimary))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .finCard()
+    }
+}
+
+private struct InvoiceSummaryRow: View {
+    let name: String
+    let totalText: String
+    let paid: Bool
+
+    var body: some View {
+        HStack(spacing: FinSpacing.sm) {
+            Circle()
+                .fill(paid ? Color.green : Color.orange)
+                .frame(width: 8, height: 8)
+            Text(name)
+                .font(.subheadline)
+                .foregroundStyle(VercelTheme.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            Text(totalText)
+                .font(.subheadline).monospacedDigit()
+                .foregroundStyle(VercelTheme.textSecondary)
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct BudgetLineRow: View {
+    let title: String
+    let colorHex: String
+    let statusText: String
+    let statusColor: Color?
+    let detailText: String
+    let fraction: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: FinSpacing.sm) {
+                Circle()
+                    .fill(VercelTheme.hex(colorHex))
+                    .frame(width: 8, height: 8)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Spacer()
+                Text(statusText)
+                    .font(.caption.bold()).monospacedDigit()
+                    .foregroundStyle(statusColor ?? VercelTheme.textSecondary)
+            }
+            FinProgressBar(
+                fraction: fraction,
+                color: statusColor == .red ? .red : (statusColor == .orange ? .orange : .green),
+                height: 6
+            )
+            Text(detailText)
+                .font(.caption2)
+                .foregroundStyle(VercelTheme.textTertiary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct BreakdownRow: View {
+    let colorHex: String
+    let name: String
+    let totalText: String
+    let percent: Int
+
+    var body: some View {
+        HStack(spacing: FinSpacing.sm) {
+            Circle().fill(VercelTheme.hex(colorHex)).frame(width: 10, height: 10)
+            Text(name)
+                .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            Text(totalText)
+                .font(.subheadline).monospacedDigit()
+                .foregroundStyle(VercelTheme.textSecondary)
+            Text("\(percent)%")
+                .font(.caption.bold()).foregroundStyle(VercelTheme.textTertiary)
+                .frame(width: 42, alignment: .trailing)
+            Image(systemName: "chevron.right")
+                .font(.caption2.bold())
+                .foregroundStyle(VercelTheme.textTertiary)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct UpcomingRow: View {
+    let title: String
+    let dateText: String
+    let amountText: String
+    let isIncome: Bool
+
+    var body: some View {
+        HStack(spacing: FinSpacing.sm) {
+            TintedIcon(
+                isIncome ? "arrow.down.left" : "arrow.up.right",
+                tint: isIncome ? .green : .red.opacity(0.85),
+                size: 32
+            )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.subheadline).foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Text(dateText)
+                    .font(.caption).foregroundStyle(VercelTheme.textTertiary)
+            }
+            Spacer()
+            Text(amountText)
+                .font(.subheadline.bold()).monospacedDigit()
+                .foregroundStyle(isIncome ? .green : VercelTheme.textPrimary)
+        }
+        .padding(.vertical, 3)
     }
 }
 

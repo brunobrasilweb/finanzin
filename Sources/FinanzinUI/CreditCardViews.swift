@@ -229,11 +229,19 @@ public struct InvoiceDetailView: View {
         store.invoiceTransactions(cardID: card.id, year: year, month: month)
     }
 
-    private var pending: [FinancialTransaction] {
-        items.filter { $0.status == .pending }
-    }
-
     public var body: some View {
+        // `items` uma vez por `body` + derivados locais (antes: o filtro
+        // `invoiceTransactions` + `isPaid`/`isClosed` rodavam 5+ vezes).
+        let all = items
+        let pend = all.filter { $0.status == .pending }
+        let total = InvoiceService.total(all)
+        let paidAll = InvoiceService.isPaid(all)
+        let closed = InvoiceService.isClosed(card: card, year: year, month: month)
+        let statusLabel = paidAll ? store.t(.invoicePaid) : (closed ? store.t(.invoiceClosed) : store.t(.invoiceOpen))
+        let statusTint: Color = paidAll ? .green : (closed ? .orange : .blue)
+        let dueDate = InvoiceService.invoiceDueDate(year: year, month: month, dueDay: card.dueDay)
+        let dueLine = String(format: store.t(.invoiceDueOn), Format.shortDate(dueDate, localeIdentifier: store.lang.localeIdentifier))
+        let localeID = store.lang.localeIdentifier
         VStack(spacing: FinSpacing.md) {
             if store.card(id: card.id) == nil {
                 EmptyStateView(
@@ -241,7 +249,7 @@ public struct InvoiceDetailView: View {
                     subtitle: store.t(.cardEmptySubtitle),
                     icon: "creditcard"
                 )
-            } else if items.isEmpty {
+            } else if all.isEmpty {
                 EmptyStateView(
                     title: String(format: store.t(.invoiceOf), card.name),
                     subtitle: store.t(.invoiceEmpty),
@@ -254,11 +262,11 @@ public struct InvoiceDetailView: View {
                             Image(systemName: "creditcard.fill")
                                 .font(.system(size: 28, weight: .semibold))
                                 .foregroundStyle(.blue)
-                            Text(store.maskedAmount(InvoiceService.total(items)))
+                            Text(store.maskedAmount(total))
                                 .font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
                                 .foregroundStyle(VercelTheme.textPrimary)
-                            Text("\(dueText) • \(statusText)")
-                                .font(.caption).foregroundStyle(statusColor)
+                            Text("\(dueLine) • \(statusLabel)")
+                                .font(.caption).foregroundStyle(statusTint)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -271,8 +279,13 @@ public struct InvoiceDetailView: View {
                             .foregroundStyle(VercelTheme.textTertiary)
                             .textCase(.uppercase)
                     ) {
-                        ForEach(items) { t in
-                            entryRow(t)
+                        ForEach(all) { t in
+                            InvoiceEntryRow(
+                                title: t.description,
+                                metaText: InvoiceDetailView.metaText(for: t, locale: localeID),
+                                amountText: store.maskedAmount(t.amount),
+                                status: InvoiceDetailView.statusInfo(for: t, language: store.lang)
+                            )
                                 .finCleanRow()
                                 .padding(.vertical, 2)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -293,7 +306,7 @@ public struct InvoiceDetailView: View {
                         }
                     }
                     Section {
-                        if !pending.isEmpty {
+                        if !pend.isEmpty {
                             Button(store.t(.invoicePay)) { confirmingPay = true }
                                 .bold()
                                 .foregroundStyle(.green)
@@ -308,8 +321,8 @@ public struct InvoiceDetailView: View {
                                 } message: {
                                     Text(String(
                                         format: store.t(.invoicePayMessage),
-                                        pending.count,
-                                        store.maskedAmount(InvoiceService.total(pending))
+                                        pend.count,
+                                        store.maskedAmount(InvoiceService.total(pend))
                                     ))
                                 }
                         }
@@ -352,54 +365,15 @@ public struct InvoiceDetailView: View {
         InvoiceService.invoiceDueDate(year: year, month: month, dueDay: card.dueDay)
     }
 
-    private var dueText: String {
-        String(format: store.t(.invoiceDueOn), Format.shortDate(due, localeIdentifier: store.lang.localeIdentifier))
-    }
-
-    private var statusText: String {
-        if InvoiceService.isPaid(items) { return store.t(.invoicePaid) }
-        if InvoiceService.isClosed(card: card, year: year, month: month) { return store.t(.invoiceClosed) }
-        return store.t(.invoiceOpen)
-    }
-
-    private var statusColor: Color {
-        if InvoiceService.isPaid(items) { return .green }
-        if InvoiceService.isClosed(card: card, year: year, month: month) { return .orange }
-        return .blue
-    }
-
-    private func entryRow(_ t: FinancialTransaction) -> some View {
-        HStack(spacing: FinSpacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(t.description)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(VercelTheme.textPrimary)
-                    .lineLimit(1)
-                Text(entryMeta(t))
-                    .font(.caption)
-                    .foregroundStyle(VercelTheme.textTertiary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(store.maskedAmount(t.amount))
-                    .font(.subheadline.bold())
-                    .monospacedDigit()
-                    .foregroundStyle(VercelTheme.textPrimary)
-                statusDot(t)
-            }
-        }
-    }
-
-    private func entryMeta(_ t: FinancialTransaction) -> String {
-        var parts = [Format.shortDate(t.dueDate, localeIdentifier: store.lang.localeIdentifier)]
+    static func metaText(for t: FinancialTransaction, locale: String) -> String {
+        var parts = [Format.shortDate(t.dueDate, localeIdentifier: locale)]
         if let n = t.currentInstallment, t.recurrence == .installment {
             parts.append("\(n)/\(t.installmentCount)")
         }
         return parts.joined(separator: " • ")
     }
 
-    private func statusDot(_ t: FinancialTransaction) -> some View {
+    static func statusInfo(for t: FinancialTransaction, language: AppLanguage) -> TransactionStatusRow {
         let color: Color = {
             if t.isOverdue { return .red }
             switch t.status {
@@ -409,10 +383,7 @@ public struct InvoiceDetailView: View {
             case .overdue: return .red
             }
         }()
-        return HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(t.status.label(language: store.lang)).font(.caption2).foregroundStyle(color)
-        }
+        return TransactionStatusRow(label: t.status.label(language: language), color: color)
     }
 
     private func pay() {
@@ -428,5 +399,40 @@ public struct InvoiceDetailView: View {
         ).map(\.id)
         store.deleteTransactions(ids: ids)
         dismiss()
+    }
+}
+
+// MARK: - Linha estreita da fatura (só `let`s)
+
+struct InvoiceEntryRow: View {
+    let title: String
+    let metaText: String
+    let amountText: String
+    let status: TransactionStatusRow
+
+    var body: some View {
+        HStack(spacing: FinSpacing.md) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Text(metaText)
+                    .font(.caption)
+                    .foregroundStyle(VercelTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(amountText)
+                    .font(.subheadline.bold())
+                    .monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
+                HStack(spacing: 4) {
+                    Circle().fill(status.color ?? VercelTheme.textTertiary).frame(width: 6, height: 6)
+                    Text(status.label).font(.caption2).foregroundStyle(status.color ?? VercelTheme.textTertiary)
+                }
+            }
+        }
     }
 }

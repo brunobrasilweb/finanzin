@@ -352,4 +352,7 @@ public struct MonthlyEvolution: Hashable, Codable, Sendable {
     public var label: String
     public var income: Decimal
     public var expense: Decimal
+
+    /// Identidade estável p/ `Chart`/`ForEach` (o `label` muda com o locale).
+    public var stableID: String { "\(year)-\(month)" }
 }

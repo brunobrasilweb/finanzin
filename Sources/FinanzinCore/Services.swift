@@ -5,7 +5,15 @@ public enum MetricsService {
     public static func monthly(_ all: [FinancialTransaction], year: Int, month: Int) -> MonthlyMetrics {
         var inc: Decimal = 0, exp: Decimal = 0
         var pRec: Decimal = 0, pPay: Decimal = 0
-        for t in all where Dates.isInMonth(t.dueDate, year: year, month: month) {
+        var overdue: Decimal = 0
+        let today = Dates.startOfDay(Date())
+        // Passe único: agregados do mês + vencidos globais juntos
+        // (antes eram 2 varreduras do array).
+        for t in all {
+            if t.type == .payable, t.status == .pending, t.dueDate < today {
+                overdue += t.amount
+            }
+            guard Dates.isInMonth(t.dueDate, year: year, month: month) else { continue }
             switch (t.type, t.status) {
             case (.receivable, .paid): inc += t.amount
             case (.payable, .paid): exp += t.amount
@@ -14,10 +22,6 @@ public enum MetricsService {
             default: break
             }
         }
-        let today = Dates.startOfDay(Date())
-        let overdue = all
-            .filter { $0.type == .payable && $0.status == .pending && $0.dueDate < today }
-            .reduce(Decimal(0)) { $0 + $1.amount }
         return MonthlyMetrics(
             totalIncome: inc, totalExpense: exp,
             pendingReceivable: pRec, pendingPayable: pPay,
@@ -50,23 +54,34 @@ public enum MetricsService {
                 total: total,
                 percentage: grandD > 0 ? (d / grandD) * 100 : 0
             )
-        }.sorted { ($0.total as NSDecimalNumber).doubleValue > ($1.total as NSDecimalNumber).doubleValue }
+        }.sorted { $0.total > $1.total }
     }
 
     public static func evolution(_ all: [FinancialTransaction], months: Int = 6, base: Date = Date(), localeIdentifier: String = "pt_BR") -> [MonthlyEvolution] {
         let comp = Dates.competence(of: base)
-        var out: [MonthlyEvolution] = []
+        // Alvos ordenados do mais antigo ao atual + índice por competência.
+        var targets: [(year: Int, month: Int)] = []
+        targets.reserveCapacity(months)
         for i in stride(from: months - 1, through: 0, by: -1) {
-            let (y, m) = Dates.shiftMonth(year: comp.year, month: comp.month, by: -i)
-            var inc: Decimal = 0, exp: Decimal = 0
-            for t in all where Dates.isInMonth(t.dueDate, year: y, month: m)
-                && (t.status == .paid || t.status == .pending)
-            {
-                if t.type == .receivable { inc += t.amount } else { exp += t.amount }
-            }
-            out.append(MonthlyEvolution(month: m, year: y, label: Dates.monthLabel(year: y, month: m, localeIdentifier: localeIdentifier), income: inc, expense: exp))
+            targets.append(Dates.shiftMonth(year: comp.year, month: comp.month, by: -i))
         }
-        return out
+        var indexByKey: [Int: Int] = [:]
+        for (i, t) in targets.enumerated() { indexByKey[t.year * 12 + t.month] = i }
+        // Passe único sobre as transações (antes: 6 filtros O(6n)).
+        var incomes = Array(repeating: Decimal(0), count: targets.count)
+        var expenses = Array(repeating: Decimal(0), count: targets.count)
+        for t in all where t.status == .paid || t.status == .pending {
+            let c = Dates.competence(of: t.dueDate)
+            guard let i = indexByKey[c.year * 12 + c.month] else { continue }
+            if t.type == .receivable { incomes[i] += t.amount } else { expenses[i] += t.amount }
+        }
+        return targets.enumerated().map { i, t in
+            MonthlyEvolution(
+                month: t.month, year: t.year,
+                label: Dates.monthLabel(year: t.year, month: t.month, localeIdentifier: localeIdentifier),
+                income: incomes[i], expense: expenses[i]
+            )
+        }
     }
 
     public static func upcoming(_ all: [FinancialTransaction], days: Int = 7, base: Date = Date()) -> [FinancialTransaction] {
@@ -128,15 +143,22 @@ public enum BudgetService {
                 effective[l.categoryID] = l
             }
         }
+        // Passe único: soma por categoria só das categorias com limite
+        // efetivo (antes: um `filter` O(n) por limite → O(R*n)).
+        var usedByCategory: [String: Decimal] = [:]
+        if !effective.isEmpty {
+            for t in transactions
+                where t.type == .payable && (t.status == .paid || t.status == .pending)
+                && t.categoryID.map({ effective[$0] != nil }) == true
+                && Dates.isInMonth(t.dueDate, year: year, month: month)
+            {
+                usedByCategory[t.categoryID ?? "", default: 0] += t.amount
+            }
+        }
         return effective.values.map { l in
-            let used = transactions
-                .filter {
-                    $0.type == .payable && ($0.status == .paid || $0.status == .pending)
-                        && $0.categoryID == l.categoryID
-                        && Dates.isInMonth($0.dueDate, year: year, month: month)
-                }
-                .reduce(Decimal(0)) { $0 + $1.amount }
-            return Row(limit: l, used: used)
+            // `used` sai do mapa agrupado em passe único (antes: um
+            // `filter` O(n) por limite → O(R*n)).
+            Row(limit: l, used: usedByCategory[l.categoryID] ?? 0)
         }
     }
 }

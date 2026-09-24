@@ -12,11 +12,15 @@ public struct WishlistListView: View {
 
     public var body: some View {
         NavigationStack {
+            // Agrupa itens uma vez por `body` (antes: `items(of:)` +
+            // `pendingTotal` por lista → O(L*n) com sorts repetidos).
+            let grouped = Dictionary(grouping: store.wishlistItems, by: \.wishlistID)
+            let lists = store.wishlists.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.wishlist)) {
                     PrivacyEyeButton()
                 }
-                if store.wishlists.isEmpty {
+                if lists.isEmpty {
                     EmptyStateView(
                         title: store.t(.wishEmptyTitle),
                         subtitle: store.t(.wishEmptySubtitle),
@@ -24,8 +28,20 @@ public struct WishlistListView: View {
                     )
                 } else {
                     List {
-                        ForEach(store.wishlists.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }) { list in
-                            card(list)
+                        ForEach(lists) { list in
+                            let pending = (grouped[list.id] ?? []).filter { !$0.purchased }
+                            let pendingTotal = pending.reduce(Decimal(0)) { $0 + $1.estimatedPrice }
+                            WishlistCardRow(
+                                icon: list.icon,
+                                tintHex: list.color,
+                                title: list.name,
+                                subtitle: pending.isEmpty
+                                    ? store.t(.wishAllBought)
+                                    : String(
+                                        format: store.t(.wishPendingSummary),
+                                        pending.count, store.maskedAmount(pendingTotal)
+                                    )
+                            )
                                 .finCleanRow()
                                 .padding(.vertical, 2)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -60,22 +76,24 @@ public struct WishlistListView: View {
             }
         }
     }
+}
 
-    private func card(_ list: Wishlist) -> some View {
-        let items = store.items(of: list.id)
-        let pending = items.filter { !$0.purchased }
-        return HStack(spacing: FinSpacing.md) {
-            TintedIcon(list.icon, tint: VercelTheme.hex(list.color), size: 44)
+// MARK: - Linha estreita da lista (só `let`s)
+
+struct WishlistCardRow: View {
+    let icon: String
+    let tintHex: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: FinSpacing.md) {
+            TintedIcon(icon, tint: VercelTheme.hex(tintHex), size: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(list.name)
+                Text(title)
                     .font(.subheadline.bold())
                     .foregroundStyle(VercelTheme.textPrimary)
-                Text(pending.isEmpty
-                    ? store.t(.wishAllBought)
-                    : String(
-                        format: store.t(.wishPendingSummary),
-                        pending.count, store.maskedAmount(store.pendingTotal(wishlistID: list.id))
-                    ))
+                Text(subtitle)
                     .font(.caption).foregroundStyle(VercelTheme.textSecondary)
             }
             Spacer()
@@ -183,12 +201,20 @@ public struct WishlistDetailView: View {
         VStack(spacing: FinSpacing.md) {
             if let list = store.wishlists.first(where: { $0.id == wishlistID }) {
                 let items = store.items(of: list.id)
+                let cats = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
+                let pendingSum = items.filter { !$0.purchased }.reduce(Decimal(0)) { $0 + $1.estimatedPrice }
+                let doneCount = items.filter(\.purchased).count
                 if items.isEmpty {
                     EmptyStateView(title: store.t(.wishEmptyListTitle), subtitle: store.t(.wishEmptyListSubtitle), icon: "gift")
                 } else {
                     List {
                         Section {
-                            totalsCard(list)
+                            WishlistTotalsCard(
+                                toGoTitle: store.t(.wishToGo),
+                                toGoText: store.maskedAmount(pendingSum),
+                                boughtTitle: store.t(.wishBought),
+                                boughtText: "\(doneCount)/\(items.count)"
+                            )
                                 .finCleanRow()
                                 .listRowSeparator(.hidden)
                         }
@@ -199,7 +225,15 @@ public struct WishlistDetailView: View {
                                 .textCase(.uppercase)
                         ) {
                             ForEach(items) { item in
-                                itemRow(item)
+                                WishlistItemRow(
+                                    name: item.name,
+                                    purchased: item.purchased,
+                                    priorityText: item.priority.label(language: store.lang),
+                                    priorityColor: item.priority == .high ? .red : (item.priority == .medium ? .orange : .gray),
+                                    categoryName: item.categoryID.flatMap { cats[$0]?.name },
+                                    priceText: store.maskedAmount(item.estimatedPrice),
+                                    onToggle: { store.setPurchased(id: item.id, purchased: !item.purchased) }
+                                )
                                     .finCleanRow()
                                     .padding(.vertical, 2)
                                     .swipeActions(edge: .leading) {
@@ -258,56 +292,69 @@ public struct WishlistDetailView: View {
                 .environmentObject(store)
         }
     }
+}
 
-    private func totalsCard(_ list: Wishlist) -> some View {
+// MARK: - Linhas estreitas do detalhe (só `let`s)
+
+struct WishlistTotalsCard: View {
+    let toGoTitle: String
+    let toGoText: String
+    let boughtTitle: String
+    let boughtText: String
+
+    var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.t(.wishToGo)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                Text(store.maskedAmount(store.pendingTotal(wishlistID: list.id)))
+                Text(toGoTitle).font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(toGoText)
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(store.t(.wishBought)).font(.caption).foregroundStyle(VercelTheme.textSecondary)
-                let done = store.items(of: list.id).filter(\.purchased).count
-                let total = store.items(of: list.id).count
-                Text("\(done)/\(total)")
+                Text(boughtTitle).font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                Text(boughtText)
                     .font(.headline).monospacedDigit()
                     .foregroundStyle(VercelTheme.textPrimary)
             }
         }
     }
+}
 
-    private func itemRow(_ item: WishlistItem) -> some View {
+struct WishlistItemRow: View {
+    let name: String
+    let purchased: Bool
+    let priorityText: String
+    let priorityColor: Color
+    let categoryName: String?
+    let priceText: String
+    let onToggle: () -> Void
+
+    var body: some View {
         HStack(spacing: FinSpacing.md) {
-            Image(systemName: item.purchased ? "checkmark.circle.fill" : "circle")
+            Image(systemName: purchased ? "checkmark.circle.fill" : "circle")
                 .font(.title3)
-                .foregroundStyle(item.purchased ? .green : VercelTheme.textTertiary)
-                .onTapGesture { store.setPurchased(id: item.id, purchased: !item.purchased) }
+                .foregroundStyle(purchased ? .green : VercelTheme.textTertiary)
+                .onTapGesture(perform: onToggle)
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.name)
+                Text(name)
                     .font(.subheadline.bold())
                     .foregroundStyle(VercelTheme.textPrimary)
-                    .strikethrough(item.purchased)
+                    .strikethrough(purchased)
                 HStack(spacing: 6) {
-                    StatusPill(item.priority.label(language: store.lang), color: priorityColor(item.priority))
-                    if let cat = store.category(id: item.categoryID) {
-                        Text(cat.name).font(.caption).foregroundStyle(VercelTheme.textSecondary)
+                    StatusPill(priorityText, color: priorityColor)
+                    if let categoryName {
+                        Text(categoryName).font(.caption).foregroundStyle(VercelTheme.textSecondary)
                     }
                 }
             }
             Spacer()
-            Text(store.maskedAmount(item.estimatedPrice))
+            Text(priceText)
                 .font(.subheadline.bold())
                 .monospacedDigit()
                 .foregroundStyle(VercelTheme.textPrimary)
         }
-        .opacity(item.purchased ? 0.55 : 1)
-    }
-
-    private func priorityColor(_ p: WishlistPriority) -> Color {
-        p == .high ? .red : p == .medium ? .orange : .gray
+        .opacity(purchased ? 0.55 : 1)
     }
 }
 

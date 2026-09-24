@@ -1,10 +1,13 @@
 import SwiftUI
 import FinanzinCore
+import ImageIO
 #if os(iOS)
 import QuickLook
 import UIKit
+import CoreGraphics
 #else
 import AppKit
+import CoreGraphics
 import QuickLookUI
 #endif
 
@@ -28,9 +31,28 @@ public struct PendingAttachment: Identifiable, Sendable {
     }
 
     public var sizeText: String {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f.string(fromByteCount: Int64(data.count))
+        ByteCountCache.string(for: data.count)
+    }
+}
+
+/// `ByteCountFormatter` cacheado (um por estilo): era um por linha.
+private enum ByteCountCache {
+    nonisolated(unsafe) private static var cached: ByteCountFormatter?
+    private static let lock = NSLock()
+
+    static func string(for bytes: Int) -> String {
+        lock.lock()
+        let f: ByteCountFormatter
+        if let hit = cached {
+            f = hit
+        } else {
+            let fresh = ByteCountFormatter()
+            fresh.countStyle = .file
+            cached = fresh
+            f = fresh
+        }
+        lock.unlock()
+        return f.string(fromByteCount: Int64(bytes))
     }
 }
 
@@ -60,9 +82,13 @@ public struct AttachmentDisplay: Identifiable {
 
 // MARK: - Miniatura (borra no modo privado)
 
+/// Decode + downsample fora do `body`: a imagem é reduzida para o tamanho
+/// da thumb (~88px @2x) em background e cacheada por anexo — antes, cada
+/// linha decodificava o arquivo full-res de forma síncrona no `body`.
 struct AttachmentThumbnail: View {
     let item: AttachmentDisplay
     var hidden: Bool = false
+    @State private var thumb: ThumbImage?
 
     var body: some View {
         ZStack {
@@ -73,8 +99,8 @@ struct AttachmentThumbnail: View {
                 Image(systemName: "doc.fill")
                     .font(.title3)
                     .foregroundStyle(.red.opacity(0.85))
-            } else if let image = thumbnailImage {
-                image
+            } else if let thumb {
+                thumb.image
                     .resizable()
                     .scaledToFill()
                     .frame(width: 44, height: 44)
@@ -86,26 +112,73 @@ struct AttachmentThumbnail: View {
                     .foregroundStyle(VercelTheme.textTertiary)
             }
         }
+        .task(id: item.id) {
+            thumb = await ThumbnailCache.shared.thumb(
+                id: item.id, data: item.imageData, url: item.fileURL)
+        }
+    }
+}
+
+#if os(iOS)
+struct ThumbImage: Sendable {
+    let ui: UIImage
+    var image: Image { Image(uiImage: ui) }
+}
+#else
+struct ThumbImage {
+    let ns: NSImage
+    var image: Image { Image(nsImage: ns) }
+}
+#endif
+
+/// Thumbs 96px cacheadas por anexo (actor: decode fora da main).
+actor ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private var cache: [String: ThumbImage] = [:]
+
+    func thumb(id: String, data: Data?, url: URL?, maxPixels: Int = 96) async -> ThumbImage? {
+        let key = "\(id)|\(maxPixels)"
+        if let hit = cache[key] { return hit }
+        let cg: CGImage?
+        if let data {
+            cg = Self.downsample(data: data, maxPixels: maxPixels)
+        } else if let url {
+            cg = Self.downsample(url: url, maxPixels: maxPixels)
+        } else {
+            return nil
+        }
+        guard let cg else { return nil }
+        #if os(iOS)
+        let t = ThumbImage(ui: UIImage(cgImage: cg))
+        #else
+        let t = ThumbImage(ns: NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)))
+        #endif
+        if cache.count > 300 { cache.removeAll() }
+        cache[key] = t
+        return t
     }
 
-    private var thumbnailImage: Image? {
-        #if os(iOS)
-        if let data = item.imageData, let ui = UIImage(data: data) {
-            return Image(uiImage: ui)
-        }
-        if let url = item.fileURL, let ui = UIImage(contentsOfFile: url.path) {
-            return Image(uiImage: ui)
-        }
-        return nil
-        #else
-        if let data = item.imageData, let ns = NSImage(data: data) {
-            return Image(nsImage: ns)
-        }
-        if let url = item.fileURL, let ns = NSImage(contentsOf: url) {
-            return Image(nsImage: ns)
-        }
-        return nil
-        #endif
+    private static func thumbOptions(_ maxPixels: Int) -> CFDictionary {
+        [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+        ] as CFDictionary
+    }
+
+    private static func downsample(data: Data, maxPixels: Int = 96) -> CGImage? {
+        guard let src = CGImageSourceCreateWithData(
+            data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOptions(maxPixels))
+    }
+
+    private static func downsample(url: URL, maxPixels: Int = 96) -> CGImage? {
+        guard let src = CGImageSourceCreateWithURL(
+            url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOptions(maxPixels))
     }
 }
 
@@ -165,10 +238,7 @@ public struct AttachmentRow: View {
     }
 
     private var dateText: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: localeIdentifier)
-        f.dateStyle = .short
-        return f.string(from: item.createdAt)
+        Format.shortStyle(item.createdAt, localeIdentifier: localeIdentifier)
     }
 }
 
@@ -320,14 +390,17 @@ public struct PhotoCaptureView: UIViewControllerRepresentable {
             // (sheet), então dispensar pelo UIKit derrubava também o form
             // da transação. O `onPick` desliga o binding e o SwiftUI
             // dispensa só o sheet da câmera.
-            guard let image = info[.originalImage] as? UIImage,
-                  let data = image.jpegData(compressionQuality: 0.85),
-                  !data.isEmpty
-            else { return }
-            // Sem ":" (o ISO8601 tem, e dois-pontos dão problema em path).
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd-HHmmss"
-            onPick(data, "foto-\(f.string(from: Date())).jpg")
+            guard let image = info[.originalImage] as? UIImage else { return }
+            // JPEG full-res fora da main (encode bloqueava o dismiss).
+            let onPick = onPick
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let data = image.jpegData(compressionQuality: 0.85),
+                      !data.isEmpty
+                else { return }
+                // Sem ":" (o ISO8601 tem, e dois-pontos dão problema em path).
+                let name = "foto-\(Dates.shortFileStamp()).jpg"
+                DispatchQueue.main.async { onPick(data, name) }
+            }
         }
 
         public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {

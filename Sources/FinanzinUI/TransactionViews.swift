@@ -33,6 +33,14 @@ public struct TransactionListView: View {
 
     public var body: some View {
         NavigationStack {
+            // Avaliados uma vez por `body`: filtro, faturas e mapas p/ linhas.
+            // (Antes: `filtered`/`invoiceEntries` rodavam 2x e cada linha
+            // refazia `category/card/attachmentCount` → O(N) queries por row.)
+            let items = filtered
+            let entries = invoiceEntries
+            let cats = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
+            let cards = Dictionary(uniqueKeysWithValues: store.creditCards.map { ($0.id, $0) })
+            let attachCounts = store.attachmentCounts()
             VStack(spacing: FinSpacing.sm) {
                 ScreenHeader(store.t(.txTitle)) {
                     PrivacyEyeButton()
@@ -79,7 +87,7 @@ public struct TransactionListView: View {
                     .padding(.horizontal, FinSpacing.lg)
                 }
 
-                if filtered.isEmpty && invoiceEntries.isEmpty {
+                if items.isEmpty && entries.isEmpty {
                         EmptyStateView(
                             title: store.t(.txEmptyTitle),
                             subtitle: store.t(.txEmptySubtitle),
@@ -87,10 +95,15 @@ public struct TransactionListView: View {
                         )
                     } else {
                         List {
-                            if !invoiceEntries.isEmpty {
+                            if !entries.isEmpty {
                                 Section(store.t(.invoiceSection)) {
-                                    ForEach(invoiceEntries, id: \.card.id) { entry in
-                                        invoiceRow(entry)
+                                    ForEach(entries, id: \.card.id) { entry in
+                                        InvoiceTxRow(
+                                            title: String(format: store.t(.invoiceOf), entry.card.name),
+                                            subtitle: "\(String(format: store.t(.invoiceDueOn), shortDate(InvoiceService.invoiceDueDate(year: year, month: month, dueDay: entry.card.dueDay)))) • \(invoiceStatusLabel(entry))",
+                                            totalText: store.maskedAmount(entry.total),
+                                            statusLabel: invoiceStatusLabel(entry)
+                                        )
                                             .listRowBackground(Color.clear)
                                             .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
                                             .listRowSeparatorTint(VercelTheme.border.opacity(0.6))
@@ -98,8 +111,16 @@ public struct TransactionListView: View {
                                     }
                                 }
                             }
-                            ForEach(filtered) { t in
-                                row(t)
+                            ForEach(items) { t in
+                                TransactionRow(
+                                    isPayable: t.type == .payable,
+                                    isIncome: t.type == .receivable,
+                                    title: t.description,
+                                    metaText: Self.metaText(for: t, cats: cats, cards: cards, language: store.lang, locale: store.lang.localeIdentifier),
+                                    attachCount: attachCounts[t.id] ?? 0,
+                                    amountText: store.maskedAmount(t.amount),
+                                    status: Self.statusInfo(for: t, language: store.lang)
+                                )
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
                                     .listRowSeparatorTint(VercelTheme.border.opacity(0.6))
@@ -231,47 +252,12 @@ public struct TransactionListView: View {
             }
     }
 
-    private func invoiceStatus(_ entry: InvoiceEntry) -> (String, Color) {
-        if InvoiceService.isPaid(entry.items) { return (store.t(.invoicePaid), .green) }
+    private func invoiceStatusLabel(_ entry: InvoiceEntry) -> String {
+        if InvoiceService.isPaid(entry.items) { return store.t(.invoicePaid) }
         if InvoiceService.isClosed(card: entry.card, year: year, month: month) {
-            return (store.t(.invoiceClosed), .orange)
+            return store.t(.invoiceClosed)
         }
-        return (store.t(.invoiceOpen), .blue)
-    }
-
-    private func invoiceRow(_ entry: InvoiceEntry) -> some View {
-        let (statusLabel, statusColor) = invoiceStatus(entry)
-        let due = InvoiceService.invoiceDueDate(year: year, month: month, dueDay: entry.card.dueDay)
-        return HStack(spacing: FinSpacing.md) {
-            Image(systemName: "creditcard.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
-                .frame(width: 32, height: 32)
-                .background(VercelTheme.inset)
-                .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: store.t(.invoiceOf), entry.card.name))
-                    .font(.subheadline.bold())
-                    .foregroundStyle(VercelTheme.textPrimary)
-                    .lineLimit(1)
-                Text("\(String(format: store.t(.invoiceDueOn), shortDate(due))) • \(statusLabel)")
-                    .font(.caption)
-                    .foregroundStyle(VercelTheme.textTertiary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(store.maskedAmount(entry.total))
-                    .font(.subheadline.bold())
-                    .monospacedDigit()
-                    .foregroundStyle(VercelTheme.textPrimary)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.bold())
-                    .foregroundStyle(VercelTheme.textTertiary)
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityHint(statusLabel)
+        return store.t(.invoiceOpen)
     }
 
     private var searchField: some View {
@@ -374,25 +360,81 @@ public struct TransactionListView: View {
         )
     }
 
-    private func row(_ t: FinancialTransaction) -> some View {
+    static func metaText(
+        for t: FinancialTransaction,
+        cats: [String: FinanceCategory],
+        cards: [String: CreditCard],
+        language: AppLanguage,
+        locale: String
+    ) -> String {
+        var parts: [String] = []
+        if let cat = t.categoryID.flatMap({ cats[$0] }) {
+            parts.append(cat.name)
+        }
+        if let card = t.creditCardID.flatMap({ cards[$0] }) {
+            parts.append(card.name)
+        }
+        parts.append(Dates.shortDayMonth(t.dueDate, localeIdentifier: locale))
+        if let n = t.currentInstallment, t.recurrence == .installment {
+            parts.append("\(n)/\(t.installmentCount)")
+        } else if t.recurrence == .fixed || t.recurrence == .recurring {
+            parts.append(t.recurrence.label(language: language))
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    static func statusInfo(for t: FinancialTransaction, language: AppLanguage) -> TransactionStatusRow {
+        if t.isOverdue {
+            return TransactionStatusRow(label: TransactionStatus.overdue.label(language: language), color: .red)
+        }
+        switch t.status {
+        case .pending: return TransactionStatusRow(label: TransactionStatus.pending.label(language: language), color: .orange)
+        case .paid: return TransactionStatusRow(label: TransactionStatus.paid.label(language: language), color: nil)
+        case .canceled: return TransactionStatusRow(label: TransactionStatus.canceled.label(language: language), color: .gray)
+        case .overdue: return TransactionStatusRow(label: TransactionStatus.overdue.label(language: language), color: .red)
+        }
+    }
+
+    private func shortDate(_ d: Date) -> String {
+        Dates.shortDayMonth(d, localeIdentifier: store.lang.localeIdentifier)
+    }
+}
+
+// MARK: - Linhas estreitas (só `let`s: a lista agrupa mapas uma vez por `body`)
+
+/// Status com cor opcional (`nil` = terciária do tema).
+struct TransactionStatusRow {
+    let label: String
+    let color: Color?
+}
+
+struct TransactionRow: View {
+    let isPayable: Bool
+    let isIncome: Bool
+    let title: String
+    let metaText: String
+    let attachCount: Int
+    let amountText: String
+    let status: TransactionStatusRow
+
+    var body: some View {
         HStack(spacing: FinSpacing.md) {
-            Image(systemName: t.type == .payable ? "arrow.up.right" : "arrow.down.left")
+            Image(systemName: isPayable ? "arrow.up.right" : "arrow.down.left")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(t.type == .payable ? .red.opacity(0.9) : .green)
+                .foregroundStyle(isPayable ? .red.opacity(0.9) : .green)
                 .frame(width: 32, height: 32)
                 .background(VercelTheme.inset)
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text(t.description)
+                Text(title)
                     .font(.subheadline)
                     .foregroundStyle(VercelTheme.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(metaLine(t))
+                    Text(metaText)
                         .font(.caption)
                         .foregroundStyle(VercelTheme.textTertiary)
                         .lineLimit(1)
-                    let attachCount = store.attachmentCount(for: t.id)
                     if attachCount > 0 {
                         Image(systemName: "paperclip")
                             .font(.caption2.bold())
@@ -405,64 +447,57 @@ public struct TransactionListView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text(store.valuesHidden ? "••••••" : amountString(t.amount))
+                Text(amountText)
                     .font(.subheadline.bold())
                     .monospacedDigit()
-                    .foregroundStyle(t.type == .receivable ? .green : VercelTheme.textPrimary)
-                statusLine(t)
+                    .foregroundStyle(isIncome ? .green : VercelTheme.textPrimary)
+                HStack(spacing: 4) {
+                    Circle().fill(status.color ?? VercelTheme.textTertiary).frame(width: 6, height: 6)
+                    Text(status.label).font(.caption2).foregroundStyle(status.color ?? VercelTheme.textTertiary)
+                }
             }
         }
         .padding(.vertical, 2)
     }
+}
 
-    private func metaLine(_ t: FinancialTransaction) -> String {
-        var parts: [String] = []
-        if let cat = store.category(id: t.categoryID) {
-            parts.append(cat.name)
-        }
-        if let card = store.card(id: t.creditCardID) {
-            parts.append(card.name)
-        }
-        parts.append(shortDate(t.dueDate))
-        if let n = t.currentInstallment, t.recurrence == .installment {
-            parts.append("\(n)/\(t.installmentCount)")
-        } else if t.recurrence == .fixed || t.recurrence == .recurring {
-            parts.append(t.recurrence.label(language: store.lang))
-        }
-        return parts.joined(separator: " • ")
-    }
+struct InvoiceTxRow: View {
+    let title: String
+    let subtitle: String
+    let totalText: String
+    let statusLabel: String
 
-    private func statusLine(_ t: FinancialTransaction) -> some View {
-        let (label, color): (String, Color) = {
-            if t.isOverdue {
-                return (TransactionStatus.overdue.label(language: store.lang), .red)
+    var body: some View {
+        HStack(spacing: FinSpacing.md) {
+            Image(systemName: "creditcard.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 32, height: 32)
+                .background(VercelTheme.inset)
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.textPrimary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(VercelTheme.textTertiary)
+                    .lineLimit(1)
             }
-            switch t.status {
-            case .pending: return (TransactionStatus.pending.label(language: store.lang), .orange)
-            case .paid: return (TransactionStatus.paid.label(language: store.lang), VercelTheme.textTertiary)
-            case .canceled: return (TransactionStatus.canceled.label(language: store.lang), .gray)
-            case .overdue: return (TransactionStatus.overdue.label(language: store.lang), .red)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(totalText)
+                    .font(.subheadline.bold())
+                    .monospacedDigit()
+                    .foregroundStyle(VercelTheme.textPrimary)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.bold())
+                    .foregroundStyle(VercelTheme.textTertiary)
             }
-        }()
-        return HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).font(.caption2).foregroundStyle(color)
         }
-    }
-
-    private func shortDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: store.lang.localeIdentifier)
-        f.dateFormat = "dd/MM"
-        return f.string(from: d)
-    }
-
-    private func amountString(_ v: Decimal) -> String {
-        Currency.format(
-            v,
-            currencyCode: store.settings.currency.currencyCode,
-            localeIdentifier: store.settings.currency.localeIdentifier
-        )
+        .padding(.vertical, 2)
+        .accessibilityHint(statusLabel)
     }
 }
 
@@ -767,7 +802,7 @@ public struct TransactionFormView: View {
                     }
                     if !errors.isEmpty {
                         Section {
-                            ForEach(errors, id: \.self) { e in
+                            ForEach(Array(errors.enumerated()), id: \.offset) { _, e in
                                 Text(e).foregroundStyle(.red)
                             }
                         }
@@ -1170,7 +1205,7 @@ public struct SettleTransactionView: View {
                     }
                     if !errors.isEmpty {
                         Section {
-                            ForEach(errors, id: \.self) { e in
+                            ForEach(Array(errors.enumerated()), id: \.offset) { _, e in
                                 Text(e).foregroundStyle(.red)
                             }
                         }
@@ -1205,10 +1240,7 @@ public struct SettleTransactionView: View {
     }
 
     private func fullDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: store.lang.localeIdentifier)
-        f.dateStyle = .short
-        return f.string(from: d)
+        Format.shortStyle(d, localeIdentifier: store.lang.localeIdentifier)
     }
 
     private func amountString(_ v: Decimal) -> String {

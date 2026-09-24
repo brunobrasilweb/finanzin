@@ -54,11 +54,97 @@ public enum Dates {
         monthLabel(year: year, month: month, localeIdentifier: "pt_BR")
     }
 
+    nonisolated(unsafe) private static var labelCache: [String: DateFormatter] = [:]
+    private static let labelLock = NSLock()
+
+    /// `DateFormatter` é caro: um por (locale, formato), reutilizado.
     public static func monthLabel(year: Int, month: Int, localeIdentifier: String) -> String {
         let date = startOfMonth(year: year, month: month)
-        let f = DateFormatter()
-        f.locale = Locale(identifier: localeIdentifier)
-        f.dateFormat = "MMM/yy"
+        let key = "MMM/yy|\(localeIdentifier)"
+        labelLock.lock()
+        let f: DateFormatter
+        if let hit = labelCache[key] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.locale = Locale(identifier: localeIdentifier)
+            fresh.dateFormat = "MMM/yy"
+            labelCache[key] = fresh
+            f = fresh
+        }
+        labelLock.unlock()
+        return f.string(from: date)
+    }
+
+    /// Nome do mês (ex.: "Janeiro"), cacheado por locale.
+    public static func monthName(_ month: Int, localeIdentifier: String) -> String {
+        let key = "MMMM|\(localeIdentifier)"
+        labelLock.lock()
+        let f: DateFormatter
+        if let hit = labelCache[key] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.locale = Locale(identifier: localeIdentifier)
+            fresh.dateFormat = "MMMM"
+            labelCache[key] = fresh
+            f = fresh
+        }
+        labelLock.unlock()
+        guard (1 ... 12).contains(month) else { return "" }
+        return f.string(from: startOfMonth(year: 2000, month: month)).capitalized
+    }
+
+    /// Data curta `dd/MM/yy`, cacheada por locale.
+    public static func shortDate(_ date: Date, localeIdentifier: String) -> String {
+        let key = "dd/MM/yy|\(localeIdentifier)"
+        labelLock.lock()
+        let f: DateFormatter
+        if let hit = labelCache[key] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.locale = Locale(identifier: localeIdentifier)
+            fresh.dateFormat = "dd/MM/yy"
+            labelCache[key] = fresh
+            f = fresh
+        }
+        labelLock.unlock()
+        return f.string(from: date)
+    }
+
+    /// Data curta `dd/MM`, cacheada por locale (linhas de transação).
+    public static func shortDayMonth(_ date: Date, localeIdentifier: String) -> String {
+        let key = "dd/MM|\(localeIdentifier)"
+        labelLock.lock()
+        let f: DateFormatter
+        if let hit = labelCache[key] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.locale = Locale(identifier: localeIdentifier)
+            fresh.dateFormat = "dd/MM"
+            labelCache[key] = fresh
+            f = fresh
+        }
+        labelLock.unlock()
+        return f.string(from: date)
+    }
+
+    /// Carimbo p/ nome de arquivo (`yyyy-MM-dd-HHmmss`), cacheado.
+    public static func shortFileStamp(_ date: Date = Date()) -> String {
+        let key = "fileStamp"
+        labelLock.lock()
+        let f: DateFormatter
+        if let hit = labelCache[key] {
+            f = hit
+        } else {
+            let fresh = DateFormatter()
+            fresh.dateFormat = "yyyy-MM-dd-HHmmss"
+            labelCache[key] = fresh
+            f = fresh
+        }
+        labelLock.unlock()
         return f.string(from: date)
     }
 
