@@ -297,6 +297,67 @@ public struct AmountText: View {
     }
 }
 
+/// Upsell do plano básico para recursos Pro (fundos, desejos).
+/// O botão abre `PlansView(.upgrade)` via `store.upgradeRequested` (sheet na raiz).
+public struct ProLockView: View {
+    @EnvironmentObject var store: Store
+    let title: String
+    let subtitle: String
+    let icon: String
+
+    public init(title: String, subtitle: String, icon: String) {
+        self.title = title
+        self.subtitle = subtitle
+        self.icon = icon
+    }
+
+    public var body: some View {
+        VStack(spacing: FinSpacing.md) {
+            ZStack {
+                Circle()
+                    .fill(Color.yellow.opacity(0.12))
+                    .frame(width: 76, height: 76)
+                    .overlay(Circle().stroke(Color.yellow.opacity(0.35), lineWidth: 1))
+                Image(systemName: icon)
+                    .font(.title)
+                    .foregroundStyle(.yellow)
+            }
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(VercelTheme.textPrimary)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(VercelTheme.textSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                store.requestUpgrade()
+            } label: {
+                Text(store.t(.proKnow))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(VercelTheme.bg)
+                    .padding(.horizontal, FinSpacing.xl)
+                    .padding(.vertical, 10)
+                    .background(VercelTheme.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, FinSpacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+#if DEBUG
+#Preview("ProLock") {
+    ProLockView(
+        title: "Fundos é Pro",
+        subtitle: "Crie reservas para viagem, emergência e sonhos no Pro.",
+        icon: "chart.pie.fill"
+    )
+    .environmentObject(Store())
+}
+#endif
+
 public struct EmptyStateView: View {
     let title: String
     let subtitle: String

@@ -26,6 +26,109 @@ public final class Store: ObservableObject {
         valuesHidden = hidden
     }
 
+    // MARK: - Plano (Free x Pro)
+
+    #if FIN_STORE_BUILD
+    /// Build da loja: pago via StoreKit (`EntitlementService` sincroniza).
+    /// Cacheado para abrir o app offline no plano certo.
+    private static let isProKey = "finIsProCached"
+    @Published public var isPro: Bool = UserDefaults.standard.bool(forKey: "finIsProCached") {
+        didSet { UserDefaults.standard.set(isPro, forKey: Self.isProKey) }
+    }
+    #else
+    /// Dev (SPM/CLT/Demo): tudo liberado, sem persistência.
+    @Published public var isPro: Bool = true
+    #endif
+
+    public func setPro(_ pro: Bool) {
+        isPro = pro
+    }
+
+    /// Onboarding de planos exibido uma única vez (primeira abertura).
+    /// Persistido em UserDefaults, fora do Snapshot JSON (como `valuesHidden`).
+    private static let seenPlansKey = "finHasSeenPlans"
+    @Published public var hasSeenPlans: Bool = UserDefaults.standard.bool(forKey: "finHasSeenPlans") {
+        didSet { UserDefaults.standard.set(hasSeenPlans, forKey: Self.seenPlansKey) }
+    }
+
+    public func markPlansSeen() {
+        hasSeenPlans = true
+    }
+
+    /// Qualquer tela pede o paywall: a raiz apresenta `PlansView(.upgrade)`.
+    /// Evita um `@State` de sheet em cada tela com gate.
+    @Published public var upgradeRequested = false
+
+    public func requestUpgrade() {
+        upgradeRequested = true
+    }
+
+    // MARK: - Cupons (validação local p/ prévia; desconto real via Apple)
+
+    private static let couponsRedeemedKey = "finCouponsRedeemed"
+    private static let couponFailsKey = "finCouponFails"
+    private static let couponLockoutKey = "finCouponLockoutUntil"
+
+    /// Cupom aplicado na sessão (prévia de preço). Não persiste:
+    /// o resgate real vira entitlement do StoreKit.
+    @Published public var appliedCoupon: CouponTier?
+
+    public enum CouponResult: Equatable {
+        case applied(CouponTier)
+        case invalid
+        case locked(TimeInterval)
+        case alreadyRedeemed(CouponTier)
+    }
+
+    public func redeemedTiers() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.couponsRedeemedKey) ?? [])
+    }
+
+    public func isCouponRedeemed(_ tier: CouponTier) -> Bool {
+        redeemedTiers().contains(tier.rawValue)
+    }
+
+    public func markCouponRedeemed(_ tier: CouponTier) {
+        var set = redeemedTiers()
+        set.insert(tier.rawValue)
+        UserDefaults.standard.set(Array(set), forKey: Self.couponsRedeemedKey)
+        if appliedCoupon == tier { appliedCoupon = nil }
+    }
+
+    public func applyCoupon(_ code: String) -> CouponResult {
+        if let until = UserDefaults.standard.object(forKey: Self.couponLockoutKey) as? Date,
+           until > Date()
+        {
+            return .locked(until.timeIntervalSinceNow)
+        }
+        guard let tier = CouponPolicy.tier(for: code) else {
+            recordCouponFail()
+            if let until = UserDefaults.standard.object(forKey: Self.couponLockoutKey) as? Date,
+               until > Date()
+            {
+                return .locked(until.timeIntervalSinceNow)
+            }
+            return .invalid
+        }
+        guard !isCouponRedeemed(tier) else { return .alreadyRedeemed(tier) }
+        UserDefaults.standard.removeObject(forKey: Self.couponFailsKey)
+        UserDefaults.standard.removeObject(forKey: Self.couponLockoutKey)
+        appliedCoupon = tier
+        return .applied(tier)
+    }
+
+    private func recordCouponFail() {
+        let fails = UserDefaults.standard.integer(forKey: Self.couponFailsKey) + 1
+        UserDefaults.standard.set(fails, forKey: Self.couponFailsKey)
+        if fails >= CouponPolicy.maxFails {
+            UserDefaults.standard.set(
+                Date().addingTimeInterval(CouponPolicy.lockoutSeconds),
+                forKey: Self.couponLockoutKey
+            )
+            UserDefaults.standard.removeObject(forKey: Self.couponFailsKey)
+        }
+    }
+
     // MARK: - Filtro global de conta (multi-contas)
 
     /// Conta selecionada no filtro global (`nil` = Todas as contas).
@@ -119,6 +222,9 @@ public final class Store: ObservableObject {
         wishlistItems = []
         categories = []
         attachments = []
+        // Sessão de cupom limpa; resgates (`finCouponsRedeemed`), `isPro`
+        // e `hasSeenPlans` são entitlement/preferência e sobrevivem.
+        appliedCoupon = nil
         // Remove os arquivos dos comprovantes em background (metadados já
         // zerados acima); o `save()` com debounce persiste o snapshot.
         let dir = attachmentsDir
@@ -187,6 +293,7 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func addCategory(name: String, type: CategoryType, color: String, icon: String) throws -> FinanceCategory {
+        guard isPro else { throw PlanError.limitReached(.categories) }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CategoryError.emptyName }
         let dup = categories.contains {
@@ -364,6 +471,9 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func addCard(name: String, closingDay: Int, dueDay: Int) throws -> CreditCard {
+        guard isPro || creditCards.count < PlanLimits.maxCards else {
+            throw PlanError.limitReached(.cards)
+        }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CardError.emptyName }
         guard (1 ... 31).contains(closingDay), (1 ... 31).contains(dueDay) else {
@@ -437,6 +547,9 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func addAccount(name: String, initialBalance: Decimal, color: String, icon: String) throws -> BankAccount {
+        guard isPro || accounts.count < PlanLimits.maxAccounts else {
+            throw PlanError.limitReached(.accounts)
+        }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AccountError.emptyName }
         guard initialBalance >= 0 else { throw AccountError.invalidAmount }
@@ -565,6 +678,7 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func addFund(name: String, initialAmount: Decimal, color: String, icon: String, notes: String?) throws -> Fund {
+        guard isPro else { throw PlanError.limitReached(.funds) }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw FundError.emptyName }
         guard initialAmount >= 0 else { throw FundError.invalidAmount }
@@ -647,6 +761,18 @@ public final class Store: ObservableObject {
               categories.contains(where: { $0.id == categoryID })
         else { throw BudgetError.categoryRequired }
         guard limitAmount > 0 else { throw BudgetError.invalidAmount }
+        // Teto do Free: 2 registros totais. Editar o existente nunca bloqueia.
+        let isNewBudget: Bool = {
+            if isRecurring {
+                return !budgets.contains { $0.categoryID == categoryID && $0.isRecurring }
+            }
+            return !budgets.contains {
+                $0.categoryID == categoryID && $0.month == month && $0.year == year && !$0.isRecurring
+            }
+        }()
+        guard isPro || !isNewBudget || budgets.count < PlanLimits.maxBudgets else {
+            throw PlanError.limitReached(.budgets)
+        }
         if isRecurring {
             if let i = budgets.firstIndex(where: { $0.categoryID == categoryID && $0.isRecurring }) {
                 budgets[i].limitAmount = limitAmount
@@ -714,6 +840,7 @@ public final class Store: ObservableObject {
 
     @discardableResult
     public func addWishlist(name: String, color: String, icon: String) throws -> Wishlist {
+        guard isPro else { throw PlanError.limitReached(.wishlists) }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw WishlistError.emptyName }
         let list = Wishlist(name: trimmed, color: color, icon: icon)

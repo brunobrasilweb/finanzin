@@ -37,7 +37,13 @@ public struct CategoryListView: View {
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.catTitle)) {
                     HeaderButton("xmark") { dismiss() }
-                    HeaderButton("plus") { showingForm = true }
+                    HeaderButton("plus") {
+                        if store.isPro {
+                            showingForm = true
+                        } else {
+                            store.requestUpgrade()
+                        }
+                    }
                 }
                 Picker(store.t(.typeLabel), selection: $filter) {
                     Text(store.t(.all)).tag(nil as CategoryType?)
@@ -223,6 +229,9 @@ public struct CategoryFormView: View {
             errorMessage = store.t(.nameRequired)
         } catch Store.CategoryError.duplicateName {
             errorMessage = store.t(.catErrDuplicate)
+        } catch is PlanError {
+            dismiss()
+            store.requestUpgrade()
         } catch {
             errorMessage = store.t(.couldNotSave)
         }

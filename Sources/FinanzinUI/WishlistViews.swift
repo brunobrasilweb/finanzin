@@ -18,9 +18,16 @@ public struct WishlistListView: View {
             let lists = store.wishlists.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.wishlist)) {
+                    UpgradeButton()
                     PrivacyEyeButton()
                 }
-                if lists.isEmpty {
+                if !store.isPro {
+                    ProLockView(
+                        title: store.t(.wishProTitle),
+                        subtitle: store.t(.wishProSubtitle),
+                        icon: "heart.fill"
+                    )
+                } else if lists.isEmpty {
                     EmptyStateView(
                         title: store.t(.wishEmptyTitle),
                         subtitle: store.t(.wishEmptySubtitle),

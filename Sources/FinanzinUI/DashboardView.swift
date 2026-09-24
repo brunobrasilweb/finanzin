@@ -29,6 +29,7 @@ public struct DashboardView: View {
                 let m = metrics
                 VStack(alignment: .leading, spacing: FinSpacing.md) {
                     ScreenHeader(L10n.t(.summary, store.settings.language)) {
+                        UpgradeButton()
                         SettingsGearButton()
                         PrivacyEyeButton()
                     }
@@ -139,16 +140,24 @@ public struct DashboardView: View {
     }
 
     private var fundsCard: some View {
-        Button { showFunds = true } label: {
+        Button {
+            if store.isPro {
+                showFunds = true
+            } else {
+                store.requestUpgrade()
+            }
+        } label: {
             HStack(spacing: FinSpacing.md) {
-                TintedIcon("chart.pie.fill", tint: .purple, size: 44)
+                TintedIcon(store.isPro ? "chart.pie.fill" : "lock.fill", tint: .purple, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.t(.funds))
                         .font(.subheadline.bold())
                         .foregroundStyle(VercelTheme.textPrimary)
-                    Text(store.funds.isEmpty
-                        ? store.t(.dashNoFunds)
-                        : String(format: store.t(.dashFundsSummary), store.funds.count, store.maskedAmount(fundsTotal)))
+                    Text(store.isPro
+                        ? (store.funds.isEmpty
+                            ? store.t(.dashNoFunds)
+                            : String(format: store.t(.dashFundsSummary), store.funds.count, store.maskedAmount(fundsTotal)))
+                        : store.t(.fundsProTitle))
                         .font(.caption).foregroundStyle(VercelTheme.textSecondary)
                 }
                 Spacer()

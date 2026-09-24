@@ -1661,6 +1661,154 @@ func testMigrateOldBaseToDefaultAccount() {
     check(reopened.accounts.count == 1, "reabertura não duplica a conta")
 }
 
+// MARK: - Planos (Free x Pro) + cupons
+
+func clearCouponState() {
+    for k in ["finCouponsRedeemed", "finCouponFails", "finCouponLockoutUntil"] {
+        UserDefaults.standard.removeObject(forKey: k)
+    }
+}
+
+func expectLimit(_ work: () throws -> Void, _ feature: PlanFeature, _ message: String) {
+    do {
+        try work()
+        check(false, "\(message): deveria bloquear")
+    } catch let e as PlanError {
+        check(e == .limitReached(feature), "\(message) (obtido \(e))")
+    } catch {
+        check(false, "\(message): erro inesperado \(error)")
+    }
+}
+
+func testPlanFreeBlocksSecondAccount() {
+    let store = Store() // seed: 1 conta (Carteira)
+    store.setPro(false)
+    expectLimit({
+        _ = try store.addAccount(name: "Banco", initialBalance: 0, color: "#fff", icon: "x")
+    }, .accounts, "free bloqueia 2ª conta")
+    store.setPro(true)
+}
+
+func testPlanFreeBlocksSecondCard() {
+    let store = Store(seedIfEmpty: false)
+    store.setPro(false)
+    _ = try! store.addCard(name: "A", closingDay: 10, dueDay: 17)
+    expectLimit({
+        _ = try store.addCard(name: "B", closingDay: 10, dueDay: 17)
+    }, .cards, "free bloqueia 2º cartão")
+    store.setPro(true)
+}
+
+func testPlanFreeBudgetsTwoMax() {
+    let store = Store()
+    store.setPro(false)
+    let cats = store.categories.filter { $0.type == .expense }
+    check(cats.count >= 3, "seed tem categorias p/ o teste")
+    _ = try! store.saveBudget(categoryID: cats[0].id, month: 10, year: 2026, limitAmount: 100)
+    _ = try! store.saveBudget(categoryID: cats[1].id, month: 10, year: 2026, limitAmount: 100)
+    expectLimit({
+        _ = try store.saveBudget(categoryID: cats[2].id, month: 10, year: 2026, limitAmount: 100)
+    }, .budgets, "free bloqueia 3º orçamento")
+    // Editar o existente nunca bloqueia.
+    _ = try! store.saveBudget(categoryID: cats[0].id, month: 10, year: 2026, limitAmount: 200)
+    check(store.budgets.count == 2, "upsert não cria 3º registro")
+    store.setPro(true)
+}
+
+func testPlanFreeBlocksFundsWishlistsCategories() {
+    let store = Store()
+    store.setPro(false)
+    expectLimit({
+        _ = try store.addFund(name: "Viagem", initialAmount: 0, color: "#fff", icon: "x", notes: nil)
+    }, .funds, "free bloqueia fundos")
+    expectLimit({
+        _ = try store.addWishlist(name: "Setup", color: "#fff", icon: "x")
+    }, .wishlists, "free bloqueia desejos")
+    expectLimit({
+        _ = try store.addCategory(name: "Nova", type: .expense, color: "#fff", icon: "x")
+    }, .categories, "free bloqueia criar categoria")
+    // Editar a existente é permitido.
+    var cat = store.categories[0]
+    cat.name = cat.name + "!"
+    try! store.updateCategory(cat)
+    check(store.categories.contains { $0.name.hasSuffix("!") }, "free edita categoria existente")
+    store.setPro(true)
+}
+
+func testPlanProUnlimited() {
+    let store = Store()
+    store.setPro(true)
+    _ = try! store.addAccount(name: "B1", initialBalance: 0, color: "#fff", icon: "x")
+    _ = try! store.addAccount(name: "B2", initialBalance: 0, color: "#fff", icon: "x")
+    _ = try! store.addCard(name: "C1", closingDay: 10, dueDay: 17)
+    _ = try! store.addCard(name: "C2", closingDay: 10, dueDay: 17)
+    let cats = store.categories.filter { $0.type == .expense }
+    for (i, c) in cats.prefix(3).enumerated() {
+        _ = try! store.saveBudget(categoryID: c.id, month: 10, year: 2026, limitAmount: Decimal(100 + i))
+    }
+    check(store.budgets.count == 3, "pro cria 3+ orçamentos")
+    _ = try! store.addFund(name: "F", initialAmount: 0, color: "#fff", icon: "x", notes: nil)
+    _ = try! store.addWishlist(name: "W", color: "#fff", icon: "x")
+    _ = try! store.addCategory(name: "NovaPro", type: .expense, color: "#fff", icon: "x")
+    check(store.isPro, "dev default é pro")
+}
+
+func testCouponTiers() {
+    clearCouponState()
+    check(CouponTier.p10.code == "5c8e", "código 10%")
+    check(CouponTier.p20.code == "3e5t", "código 20%")
+    check(CouponTier.p50.code == "7hu2", "código 50%")
+    check(CouponTier.p100.code == "5t6w", "código 100%")
+    check(CouponPolicy.tier(for: CouponTier.p10.code) == .p10, "cupom 10%")
+    check(CouponPolicy.tier(for: " 3E5T ") == .p20, "normaliza espaço/maiúscula")
+    check(CouponPolicy.tier(for: CouponTier.p50.code) == .p50, "cupom 50%")
+    check(CouponPolicy.tier(for: CouponTier.p100.code) == .p100, "cupom 100%")
+    check(CouponPolicy.tier(for: "xxxx") == nil, "código errado é nil")
+    check(CouponPolicy.tier(for: "") == nil, "vazio é nil")
+    eq(CouponPolicy.preview(base: Decimal(97), percent: 20), 77.60, "anual −20%")
+    eq(CouponPolicy.preview(base: Decimal(string: "9.70") ?? 0, percent: 10), 8.73, "mensal −10%")
+    clearCouponState()
+}
+
+func testCouponLockout() {
+    clearCouponState()
+    let store = Store(seedIfEmpty: false)
+    for i in 0..<4 {
+        let r = store.applyCoupon("errado\(i)")
+        check(r == .invalid, "tentativa \(i + 1) inválida")
+    }
+    let fifth = store.applyCoupon("errado4")
+    if case .locked = fifth {
+        check(true, "5ª tentativa bloqueia")
+    } else {
+        check(false, "5ª tentativa deveria bloquear (obtido \(fifth))")
+    }
+    clearCouponState()
+}
+
+func testCouponRedeemedSurvivesReset() {
+    clearCouponState()
+    let store = Store(seedIfEmpty: false)
+    check(store.applyCoupon(CouponTier.p20.code) == .applied(.p20), "aplica 20%")
+    check(store.appliedCoupon == .p20, "tier em sessão")
+    store.markCouponRedeemed(.p20)
+    check(store.isCouponRedeemed(.p20), "marca resgate")
+    check(store.applyCoupon(CouponTier.p20.code) == .alreadyRedeemed(.p20), "reuso bloqueado")
+    store.resetToDefaults()
+    check(store.isCouponRedeemed(.p20), "resgate sobrevive ao zerar")
+    check(store.appliedCoupon == nil, "sessão limpa ao zerar")
+    clearCouponState()
+}
+
+func testPlansSeenOnce() {
+    UserDefaults.standard.removeObject(forKey: "finHasSeenPlans")
+    let store = Store(seedIfEmpty: false)
+    check(store.hasSeenPlans == false, "padrão não visto")
+    store.markPlansSeen()
+    check(Store(seedIfEmpty: false).hasSeenPlans == true, "persiste entre instâncias")
+    UserDefaults.standard.removeObject(forKey: "finHasSeenPlans")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -1774,6 +1922,15 @@ struct TestRunner {
             ("testSeedCreatesDefaultAccount", testSeedCreatesDefaultAccount),
             ("testAccountSnapshotRoundTrip", testAccountSnapshotRoundTrip),
             ("testMigrateOldBaseToDefaultAccount", testMigrateOldBaseToDefaultAccount),
+            ("testPlanFreeBlocksSecondAccount", testPlanFreeBlocksSecondAccount),
+            ("testPlanFreeBlocksSecondCard", testPlanFreeBlocksSecondCard),
+            ("testPlanFreeBudgetsTwoMax", testPlanFreeBudgetsTwoMax),
+            ("testPlanFreeBlocksFundsWishlistsCategories", testPlanFreeBlocksFundsWishlistsCategories),
+            ("testPlanProUnlimited", testPlanProUnlimited),
+            ("testCouponTiers", testCouponTiers),
+            ("testCouponLockout", testCouponLockout),
+            ("testCouponRedeemedSurvivesReset", testCouponRedeemedSurvivesReset),
+            ("testPlansSeenOnce", testPlansSeenOnce),
         ]
         for (name, fn) in tests {
             print("▶ \(name)")

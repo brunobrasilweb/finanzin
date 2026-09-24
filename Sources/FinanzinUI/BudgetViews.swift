@@ -23,6 +23,7 @@ public struct BudgetListView: View {
             let cats = Dictionary(uniqueKeysWithValues: store.categories.map { ($0.id, $0) })
             VStack(spacing: FinSpacing.md) {
                 ScreenHeader(store.t(.budgets)) {
+                    UpgradeButton()
                     PrivacyEyeButton()
                 }
                 MonthPicker(year: $year, month: $month, localeIdentifier: store.lang.localeIdentifier)
@@ -306,6 +307,9 @@ public struct BudgetFormView: View {
             errorMessage = store.t(.budErrCategory)
         } catch Store.BudgetError.invalidAmount {
             errorMessage = store.t(.budErrAmount)
+        } catch is PlanError {
+            dismiss()
+            store.requestUpgrade()
         } catch {
             errorMessage = store.t(.couldNotSave)
         }

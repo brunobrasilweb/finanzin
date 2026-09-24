@@ -55,6 +55,23 @@ public struct SettingsView: View {
                 }
 
                 Section(t(.notificationsSection)) {
+                    if !store.isPro {
+                        Button {
+                            dismiss()
+                            store.requestUpgrade()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "lock.fill")
+                                    .foregroundStyle(.yellow)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t(.notifProTitle))
+                                    Text(t(.notifProSubtitle))
+                                        .font(.caption)
+                                        .foregroundStyle(VercelTheme.textSecondary)
+                                }
+                            }
+                        }
+                    }
                     Toggle(t(.notifMaster), isOn: masterBinding)
                     if permissionDenied {
                         Text(t(.notifDenied))
@@ -69,7 +86,7 @@ public struct SettingsView: View {
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
-                    .disabled(!notificationsGranted)
+                    .disabled(!notificationsGranted || !store.isPro)
                     Toggle(isOn: prefsBinding(\.payDueDayEnabled)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(t(.notifPayDue))
@@ -78,7 +95,7 @@ public struct SettingsView: View {
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
-                    .disabled(!notificationsGranted)
+                    .disabled(!notificationsGranted || !store.isPro)
                     Toggle(isOn: prefsBinding(\.receiveDueDayEnabled)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(t(.notifReceiveDue))
@@ -87,9 +104,9 @@ public struct SettingsView: View {
                                 .foregroundStyle(VercelTheme.textSecondary)
                         }
                     }
-                    .disabled(!notificationsGranted)
+                    .disabled(!notificationsGranted || !store.isPro)
                     DatePicker(t(.notifTime), selection: timeBinding, displayedComponents: .hourAndMinute)
-                        .disabled(!notificationsGranted)
+                        .disabled(!notificationsGranted || !store.isPro)
                 }
 
                 Section(t(.appearanceSection)) {
@@ -114,6 +131,19 @@ public struct SettingsView: View {
                 }
 
                 Section(t(.aboutSection)) {
+                    if store.isPro {
+                        HStack {
+                            Image(systemName: "crown.fill")
+                                .foregroundStyle(.yellow)
+                            Text(t(.proActive))
+                            Spacer()
+                        }
+                    } else {
+                        Button(t(.proKnow)) {
+                            dismiss()
+                            store.requestUpgrade()
+                        }
+                    }
                     HStack {
                         Text(t(.version))
                         Spacer()
@@ -250,7 +280,11 @@ public struct SettingsView: View {
 
     private func reschedule() {
         #if canImport(UserNotifications)
-        NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+        if store.isPro {
+            NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+        } else {
+            NotificationService.cancelAll(transactions: store.transactions)
+        }
         #endif
     }
 }

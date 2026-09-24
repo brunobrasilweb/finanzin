@@ -27,7 +27,13 @@ public struct AccountListView: View {
                         HeaderButton("xmark") { dismiss() }
                     }
                     PrivacyEyeButton()
-                    HeaderButton("plus") { showingForm = true }
+                    HeaderButton("plus") {
+                        if store.isPro || store.accounts.count < PlanLimits.maxAccounts {
+                            showingForm = true
+                        } else {
+                            store.requestUpgrade()
+                        }
+                    }
                 }
                 if store.accounts.isEmpty {
                     EmptyStateView(
@@ -258,6 +264,9 @@ public struct AccountFormView: View {
             errorMessage = store.t(.accountErrAmount)
         } catch Store.AccountError.lastAccount {
             errorMessage = store.t(.accountLastBlocked)
+        } catch is PlanError {
+            dismiss()
+            store.requestUpgrade()
         } catch {
             errorMessage = store.t(.couldNotSave)
         }

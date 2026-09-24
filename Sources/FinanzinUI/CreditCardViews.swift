@@ -23,7 +23,13 @@ public struct CreditCardListView: View {
                         HeaderButton("xmark") { dismiss() }
                     }
                     PrivacyEyeButton()
-                    HeaderButton("plus") { showingForm = true }
+                    HeaderButton("plus") {
+                        if store.isPro || store.creditCards.count < PlanLimits.maxCards {
+                            showingForm = true
+                        } else {
+                            store.requestUpgrade()
+                        }
+                    }
                 }
                 if store.creditCards.isEmpty {
                     EmptyStateView(
@@ -200,6 +206,9 @@ public struct CreditCardFormView: View {
             errorMessage = store.t(.cardErrDuplicate)
         } catch Store.CardError.invalidDay {
             errorMessage = store.t(.cardErrDay)
+        } catch is PlanError {
+            dismiss()
+            store.requestUpgrade()
         } catch {
             errorMessage = store.t(.couldNotSave)
         }

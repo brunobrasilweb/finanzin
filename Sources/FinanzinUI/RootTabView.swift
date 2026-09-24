@@ -4,6 +4,7 @@ import FinanzinCore
 
 public struct RootTabView: View {
     @StateObject private var store: Store
+    @StateObject private var entitlements: EntitlementService
     @State private var year: Int = Calendar.current.component(.year, from: Date())
     @State private var month: Int = Calendar.current.component(.month, from: Date())
     @State private var selectedTab = 0
@@ -14,6 +15,8 @@ public struct RootTabView: View {
     @State private var showAISheet = false
     @State private var showBudgetForm = false
     @State private var showWishlistForm = false
+    /// Onboarding de planos: uma única vez, após o splash.
+    @State private var showOnboarding = false
     @State private var rescheduleWork: DispatchWorkItem?
     /// Splash inicial: overlay com logo + nome animados enquanto o
     /// dashboard monta por baixo. Dispensado após ~1.5s (tempo mínimo
@@ -22,7 +25,9 @@ public struct RootTabView: View {
 
     public init(store: Store? = nil) {
         // No app iOS, persiste em Application Support; demo/previews injetam Store() em memória.
-        _store = StateObject(wrappedValue: store ?? Store(persistTo: Store.defaultFileURL()))
+        let s = store ?? Store(persistTo: Store.defaultFileURL())
+        _store = StateObject(wrappedValue: s)
+        _entitlements = StateObject(wrappedValue: EntitlementService(store: s))
     }
 
     public var body: some View {
@@ -88,6 +93,19 @@ public struct RootTabView: View {
         .finTabChrome()
         .environment(\.locale, store.settings.locale)
         .environmentObject(store)
+        .environmentObject(entitlements)
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showOnboarding, onDismiss: { store.markPlansSeen() }) {
+            PlansView(mode: .onboarding, store: store, entitlements: entitlements)
+        }
+        #else
+        .sheet(isPresented: $showOnboarding, onDismiss: { store.markPlansSeen() }) {
+            PlansView(mode: .onboarding, store: store, entitlements: entitlements)
+        }
+        #endif
+        .sheet(isPresented: $store.upgradeRequested) {
+            PlansView(mode: .upgrade, store: store, entitlements: entitlements)
+        }
         .sheet(isPresented: $showTxForm, onDismiss: { txDraft = nil }) {
             TransactionFormView(year: year, month: month, draft: txDraft)
                 .environmentObject(store)
@@ -121,6 +139,9 @@ public struct RootTabView: View {
             reschedule()
             dismissSplash()
         }
+        .task {
+            await entitlements.configure()
+        }
         .onOpenURL { url in openQuickAdd(url) }
         .onChange(of: store.transactions) { reschedule() }
         .onChange(of: store.settings) { reschedule() }
@@ -152,6 +173,10 @@ public struct RootTabView: View {
             withAnimation(.easeOut(duration: 0.35)) {
                 showSplash = false
             }
+            // Onboarding de planos: uma única vez, logo após a apresentação.
+            if !store.hasSeenPlans {
+                showOnboarding = true
+            }
         }
     }
 
@@ -162,7 +187,13 @@ public struct RootTabView: View {
         rescheduleWork?.cancel()
         let work = DispatchWorkItem {
             #if canImport(UserNotifications)
-            NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+            // Sem notificações no Free: só agenda no Pro; ao perder o Pro,
+            // cancela as pendentes em vez de reagendar.
+            if store.isPro {
+                NotificationService.rescheduleAll(transactions: store.transactions, settings: store.settings)
+            } else {
+                NotificationService.cancelAll(transactions: store.transactions)
+            }
             #endif
         }
         rescheduleWork = work
@@ -174,8 +205,18 @@ public struct RootTabView: View {
     /// Desejos → lista).
     private func fabTap() {
         switch selectedTab {
-        case 2: showBudgetForm = true
-        case 3: showWishlistForm = true
+        case 2:
+            if store.isPro || store.budgets.count < PlanLimits.maxBudgets {
+                showBudgetForm = true
+            } else {
+                store.requestUpgrade()
+            }
+        case 3:
+            if store.isPro {
+                showWishlistForm = true
+            } else {
+                store.requestUpgrade()
+            }
         default: showEntryChoice = true
         }
     }

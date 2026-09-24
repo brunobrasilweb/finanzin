@@ -45,6 +45,7 @@ public struct TransactionListView: View {
             let attachCounts = store.attachmentCounts()
             VStack(spacing: FinSpacing.sm) {
                 ScreenHeader(store.t(.txTitle)) {
+                    UpgradeButton()
                     PrivacyEyeButton()
                     HeaderButton("banknote") { showingAccounts = true }
                     HeaderButton("creditcard") { showingCards = true }

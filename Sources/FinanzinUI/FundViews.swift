@@ -33,9 +33,21 @@ public struct FundListView: View {
                         HeaderButton("xmark") { dismiss() }
                     }
                     PrivacyEyeButton()
-                    HeaderButton("plus") { showingForm = true }
+                    HeaderButton("plus") {
+                        if store.isPro {
+                            showingForm = true
+                        } else {
+                            store.requestUpgrade()
+                        }
+                    }
                 }
-                if funds.isEmpty {
+                if !store.isPro {
+                    ProLockView(
+                        title: store.t(.fundsProTitle),
+                        subtitle: store.t(.fundsProSubtitle),
+                        icon: "chart.pie.fill"
+                    )
+                } else if funds.isEmpty {
                     EmptyStateView(
                         title: store.t(.fundEmptyTitle),
                         subtitle: store.t(.fundEmptySubtitle),
@@ -231,6 +243,9 @@ public struct FundFormView: View {
             errorMessage = store.t(.nameRequired)
         } catch Store.FundError.invalidAmount {
             errorMessage = store.t(.fundErrAmount)
+        } catch is PlanError {
+            dismiss()
+            store.requestUpgrade()
         } catch {
             errorMessage = store.t(.couldNotSave)
         }

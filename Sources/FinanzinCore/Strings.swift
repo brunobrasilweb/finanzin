@@ -312,6 +312,53 @@ public enum L10nKey: String, CaseIterable, Sendable {
     case aiUseData
     case aiTranscribing
     case aiEnhancing
+    // Planos (Free x Pro)
+    case planTitle
+    case planSubtitle
+    case planFree
+    case planBasic
+    case planPro
+    case planPopular
+    case planMonthly
+    case planAnnual
+    case planSaveBadge
+    case planCtaYearly
+    case planCtaMonthly
+    case planContinueFree
+    case planRestore
+    case planManage
+    case planCoupon
+    case planCouponPh
+    case planCouponApply
+    case planCouponInvalid
+    case planCouponLocked
+    case planCouponUsed
+    case planCouponOk
+    case planRedeem
+    case planRedeemNote
+    case planDevNote
+    case planTerms
+    case planFeatTx
+    case planFeatAcct
+    case planFeatBudget
+    case planFeatFunds
+    case planFeatWish
+    case planFeatCat
+    case planFeatNotif
+    case planValUnlimited
+    case planVal121
+    case planVal2
+    case planValEdit
+    case planValNone
+    case proActive
+    case proKnow
+    case upgradeAcc
+    case notifProTitle
+    case notifProSubtitle
+    case fundsProTitle
+    case fundsProSubtitle
+    case wishProTitle
+    case wishProSubtitle
 }
 
 public enum L10n {
@@ -634,6 +681,53 @@ public enum L10n {
         case .aiUseData: "Usar estes dados"
         case .aiTranscribing: "Transcrevendo…"
         case .aiEnhancing: "Interpretando com IA…"
+        // Planos
+        case .planTitle: "Escolha seu plano"
+        case .planSubtitle: "Tudo no aparelho, privado por padrão. Sem conta, sem banco conectado."
+        case .planFree: "Grátis"
+        case .planBasic: "Básico"
+        case .planPro: "Pro"
+        case .planPopular: "Mais popular"
+        case .planMonthly: "Mensal"
+        case .planAnnual: "Anual"
+        case .planSaveBadge: "−17% · 2 meses grátis"
+        case .planCtaYearly: "Assinar Pro · %@/ano"
+        case .planCtaMonthly: "Assinar Pro · %@/mês"
+        case .planContinueFree: "Continuar no Básico"
+        case .planRestore: "Restaurar compra"
+        case .planManage: "Gerenciar assinatura"
+        case .planCoupon: "Tenho cupom de desconto"
+        case .planCouponPh: "Digite o código"
+        case .planCouponApply: "Aplicar"
+        case .planCouponInvalid: "Cupom inválido."
+        case .planCouponLocked: "Muitas tentativas. Tente em %ds."
+        case .planCouponUsed: "Cupom já resgatado neste aparelho."
+        case .planCouponOk: "Cupom de %d%% aplicado! Preços atualizados."
+        case .planRedeem: "Resgatar cupom na Apple"
+        case .planRedeemNote: "O desconto é ativado na tela da Apple com o código do cupom."
+        case .planDevNote: "Ambiente dev: tudo liberado, compras desabilitadas."
+        case .planTerms: "Cobrança na conta Apple · cancele quando quiser."
+        case .planFeatTx: "Transações ilimitadas"
+        case .planFeatAcct: "Contas e cartões"
+        case .planFeatBudget: "Orçamentos"
+        case .planFeatFunds: "Fundos (reservas)"
+        case .planFeatWish: "Listas de desejos"
+        case .planFeatCat: "Criar categorias"
+        case .planFeatNotif: "Notificações"
+        case .planValUnlimited: "Ilimitado"
+        case .planVal121: "1 conta · 1 cartão"
+        case .planVal2: "2 orçamentos"
+        case .planValEdit: "só edita"
+        case .planValNone: "—"
+        case .proActive: "Finanzin Pro ativo"
+        case .proKnow: "Conhecer o Pro"
+        case .upgradeAcc: "Ver planos"
+        case .notifProTitle: "Notificações é Pro"
+        case .notifProSubtitle: "Alertas de vencimento liberados no Pro."
+        case .fundsProTitle: "Fundos é Pro"
+        case .fundsProSubtitle: "Crie reservas para viagem, emergência e sonhos no Pro."
+        case .wishProTitle: "Desejos é Pro"
+        case .wishProSubtitle: "Listas de sonhos com prioridade e preço no Pro."
         }
     }
 
@@ -934,6 +1028,52 @@ public enum L10n {
         case .aiUseData: "Use these details"
         case .aiTranscribing: "Transcribing…"
         case .aiEnhancing: "Interpreting with AI…"
+        case .planTitle: "Choose your plan"
+        case .planSubtitle: "Everything on-device, private by default. No account, no bank connection."
+        case .planFree: "Free"
+        case .planBasic: "Basic"
+        case .planPro: "Pro"
+        case .planPopular: "Most popular"
+        case .planMonthly: "Monthly"
+        case .planAnnual: "Annual"
+        case .planSaveBadge: "−17% · 2 months free"
+        case .planCtaYearly: "Go Pro · %@/yr"
+        case .planCtaMonthly: "Go Pro · %@/mo"
+        case .planContinueFree: "Stay on Basic"
+        case .planRestore: "Restore purchase"
+        case .planManage: "Manage subscription"
+        case .planCoupon: "I have a discount code"
+        case .planCouponPh: "Enter the code"
+        case .planCouponApply: "Apply"
+        case .planCouponInvalid: "Invalid code."
+        case .planCouponLocked: "Too many tries. Retry in %ds."
+        case .planCouponUsed: "Code already redeemed on this device."
+        case .planCouponOk: "%d%% code applied! Prices updated."
+        case .planRedeem: "Redeem code with Apple"
+        case .planRedeemNote: "The discount is enabled on Apple's screen with the coupon code."
+        case .planDevNote: "Dev environment: everything unlocked, purchases disabled."
+        case .planTerms: "Charged to your Apple account · cancel anytime."
+        case .planFeatTx: "Unlimited transactions"
+        case .planFeatAcct: "Accounts & cards"
+        case .planFeatBudget: "Budgets"
+        case .planFeatFunds: "Funds (savings)"
+        case .planFeatWish: "Wishlists"
+        case .planFeatCat: "Create categories"
+        case .planFeatNotif: "Notifications"
+        case .planValUnlimited: "Unlimited"
+        case .planVal121: "1 account · 1 card"
+        case .planVal2: "2 budgets"
+        case .planValEdit: "edit only"
+        case .planValNone: "—"
+        case .proActive: "Finanzin Pro active"
+        case .proKnow: "Meet Pro"
+        case .upgradeAcc: "View plans"
+        case .notifProTitle: "Notifications is Pro"
+        case .notifProSubtitle: "Due-date alerts unlocked in Pro."
+        case .fundsProTitle: "Funds is Pro"
+        case .fundsProSubtitle: "Create savings for travel, emergencies and dreams in Pro."
+        case .wishProTitle: "Wishlist is Pro"
+        case .wishProSubtitle: "Dream lists with priority and price in Pro."
         }
     }
 }

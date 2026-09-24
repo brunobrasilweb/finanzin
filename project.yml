@@ -5,6 +5,13 @@
 # IMPORTANTE: Sources/FinanzinDemo NÃO entra no app iOS (tem @main próprio
 # para a demo macOS; incluí-lo quebraria o build com "duplicate @main").
 
+# NOTA DE MONETIZAÇÃO: só o build Release do Xcode (Archive p/ loja/TestFlight)
+# compila com `-D FIN_STORE_BUILD` e aplica o paywall (Free limitado, Pro via StoreKit).
+# Todo o resto é dev com tudo liberado (`isPro == true`, sem compra):
+# - `swift build` / `swift run FinanzinDemo` (SPM/CLT, sem a flag);
+# - Xcode em Debug (iPhone via cabo ou simulador).
+# Ou seja: só o Archive/Release cobra; desenvolver e testar é sempre livre.
+
 name: Finanzin
 
 options:
@@ -23,6 +30,9 @@ targets:
       base:
         SWIFT_VERSION: "6.0"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+      configs:
+        Release:
+          OTHER_SWIFT_FLAGS: $(inherited) -D FIN_STORE_BUILD
   FinanzinUI:
     type: library.static
     platform: iOS
@@ -35,6 +45,9 @@ targets:
       base:
         SWIFT_VERSION: "6.0"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+      configs:
+        Release:
+          OTHER_SWIFT_FLAGS: $(inherited) -D FIN_STORE_BUILD
   Finanzin:
     type: application
     platform: iOS
@@ -71,3 +84,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Release:
+          OTHER_SWIFT_FLAGS: $(inherited) -D FIN_STORE_BUILD
